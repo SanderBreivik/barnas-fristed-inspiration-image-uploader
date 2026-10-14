@@ -1,0 +1,20 @@
+app = "barnas-fristed-inspirasjon"
+primary_region = "arn"
+[env]
+  PORT = "8080"
+  DATA_DIR = "/data"
+  SHOP_ORIGIN = "https://barnasfristed.no"
+  CONSENT_VERSION = "2026-10-v1"
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 20
+    hard_limit = 40
+[[mounts]]
+  source = "inspiration_data"
+  destination = "/data"
