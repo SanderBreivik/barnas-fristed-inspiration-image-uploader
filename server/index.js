@@ -2,12 +2,19 @@ import express from "express";
 import helmet from "helmet";
 import Database from "better-sqlite3";
 import sharp from "sharp";
+import {
+  backupDatabase,
+  backupIfDue,
+  reconcile,
+  retryDeletions,
+} from "./maintenance.js";
 import multer from "multer";
 import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 import {
   createHash,
@@ -267,13 +274,13 @@ async function turnstile(token, ip) {
 
   return result.success === true && isAllowedHostname(result.hostname);
 }
-async function put(key, body) {
+async function put(key, body, contentType = "image/webp") {
   await s3.send(
     new PutObjectCommand({
       Bucket: bucket,
       Key: key,
       Body: body,
-      ContentType: "image/webp",
+      ContentType: contentType,
     }),
   );
 }
@@ -290,8 +297,21 @@ async function del(key) {
     Key: key
   }));
 }
+async function list(prefix) {
+  const out = [];
+  let token;
+  do {
+    const r = await s3.send(
+      new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }),
+    );
+    for (const o of r.Contents || [])
+      out.push({ key: o.Key, size: o.Size, lastModified: o.LastModified });
+    token = r.IsTruncated ? r.NextContinuationToken : undefined;
+  } while (token);
+  return out;
+}
 // Indirection so tests can replace storage.
-export const storage = { put, get, del };
+export const storage = { put, get, del, list };
 app.get("/health", (_req, res) => res.json({
   ok: true
 }));
@@ -691,6 +711,48 @@ app.post("/api/admin/photos/:id/:action", admin, async (req, res) => {
     status
   });
 });
+// ---- Maintenance (admin only) ---------------------------------------------
+const BACKUP_KEEP = num(env.BACKUP_KEEP, 14);
+const maint = () => ({ db, storage, dataDir, keep: BACKUP_KEEP });
+app.post("/api/admin/backup", sameOriginOnly, admin, async (_req, res) => {
+  try {
+    const r = await backupDatabase(maint());
+    console.log(JSON.stringify({ event: "backup_ok", key: r.key, bytes: r.bytes, pruned: r.pruned, manual: true }));
+    res.json({ ok: true, ...r });
+  } catch (e) {
+    console.error(JSON.stringify({ event: "backup_failed", message: e?.message }));
+    error(res, "Backup failed", 500);
+  }
+});
+app.get("/api/admin/maintenance/reconcile", admin, async (_req, res) => {
+  try {
+    res.json(await reconcile({ db, storage }));
+  } catch (e) {
+    console.error(JSON.stringify({ event: "reconcile_failed", message: e?.message }));
+    error(res, "Reconcile failed", 500);
+  }
+});
+app.post("/api/admin/maintenance/retry-deletions", sameOriginOnly, admin, async (_req, res) => {
+  try {
+    res.json({ ok: true, ...(await retryDeletions({ db, storage })) });
+  } catch (e) {
+    console.error(JSON.stringify({ event: "retry_deletions_failed", message: e?.message }));
+    error(res, "Retry failed", 500);
+  }
+});
+// Daily automatic backup. Checks hourly so a restart never skips or duplicates one.
+if (process.env.NODE_ENV !== "test" && !process.env.NO_LISTEN && env.BACKUP_ENABLED !== "false") {
+  const tick = async () => {
+    try {
+      const r = await backupIfDue({ ...maint(), intervalHours: num(env.BACKUP_INTERVAL_HOURS, 24) });
+      if (r) console.log(JSON.stringify({ event: "backup_ok", key: r.key, bytes: r.bytes, pruned: r.pruned }));
+    } catch (e) {
+      console.error(JSON.stringify({ event: "backup_failed", message: e?.message }));
+    }
+  };
+  setTimeout(tick, 60_000).unref();
+  setInterval(tick, 3600_000).unref();
+}
 export { app, db };
-if (process.env.NODE_ENV !== "test")
+if (process.env.NODE_ENV !== "test" && !process.env.NO_LISTEN)
   app.listen(Number(env.PORT || 8080), "0.0.0.0", () => console.log("Listening"));

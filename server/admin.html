@@ -456,6 +456,50 @@
         if (sec.open) fill();
         box.append(sec);
       }
+      box.append(maintenance());
+    }
+    function maintenance() {
+      const sec = el("details", "sec"),
+        sum = el("summary");
+      sum.append(el("span", "", "Vedlikehold"));
+      sec.append(sum);
+      const wrap = el("div", "grid"),
+        out = el("pre", "");
+      out.style.cssText =
+        "grid-column:1/-1;white-space:pre-wrap;background:#f4f2ee;padding:12px;border-radius:8px;margin:0;font-size:13px";
+      out.textContent =
+        "Sikkerhetskopi tas automatisk hver natt. Bruk knappene ved behov.";
+      const run = async (label, path, method) => {
+        out.textContent = label + " …";
+        try {
+          const r = await api(path, { method });
+          const d = await r.json();
+          out.textContent = r.ok
+            ? JSON.stringify(d, null, 2)
+            : "Feilet: " + (d.error || r.status);
+        } catch {
+          out.textContent = "Nettverksfeil";
+        }
+      };
+      const mk = (t, f) => {
+        const b = el("button", "", t);
+        b.onclick = f;
+        return b;
+      };
+      wrap.append(
+        mk("Ta sikkerhetskopi nå", () =>
+          run("Tar sikkerhetskopi", "/api/admin/backup", "POST"),
+        ),
+        mk("Sjekk lagring mot database", () =>
+          run("Sjekker", "/api/admin/maintenance/reconcile", "GET"),
+        ),
+        mk("Fullfør ventende slettinger", () =>
+          run("Fullfører", "/api/admin/maintenance/retry-deletions", "POST"),
+        ),
+        out,
+      );
+      sec.append(wrap);
+      return sec;
     }
     document.getElementById("login").onclick = login;
     pass.onkeydown = (e) => {

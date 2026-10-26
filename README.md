@@ -45,6 +45,62 @@ Foreslått oppbevaring (må godkjennes; ikke automatisert ennå, se Task 2.4):
 
 Bilder med barn og gjenkjennelige personer: innsender bekrefter tillatelse (foresatt for barn); moderator bør avvise bilder der barn kan identifiseres uten åpenbar tillatelse. Fjerning: via slettelenken (vises og kan kopieres etter opplasting). Lenken kan ikke gjenopprettes; kunder som mister den må kontakte butikken, som kan slette via `/admin`.
 
+## Backup og gjenoppretting
+
+Lagringen har to deler, og begge må kunne gjenopprettes:
+
+| Del | Beskyttelse | Oppbevaring |
+|---|---|---|
+| SQLite (`/data/photos.sqlite`) | 1) Daglig SQLite-konsistent kopi (online backup API), gzip, lastet opp til Tigris under `backups/`. 2) Siste kopi ligger også på volumet i `/data/backups/latest.sqlite.gz`. 3) Fly volume-snapshots (daglig, automatisk). | Appen beholder de **14** nyeste kopiene (`BACKUP_KEEP`). Snapshots: sett f.eks. 14 dager (kommando under). |
+| Bilder (Tigris `photos/`) | Bildene er kun i Tigris. Bildene ligger i samme bucket som kopiene, så bucketen må ikke slettes. | Til kunden sletter bildet. |
+
+Sikkerhetskopiene inneholder personopplysninger (visningsnavn, samtykkelogg, hash av slettetoken). Slettede bilders metadata kan derfor ligge i kopier i inntil 14 dager. Dette må stå i personvernerklæringen. Aktiver Tigris-versjonering **ikke** uten å vurdere dette, siden det beholder slettede bilder.
+
+Kopien tas automatisk ca. hvert døgn (sjekkes hver time, så restart gir ikke duplikater). Slå av med `BACKUP_ENABLED=false`. Feil logges som `backup_failed` i `fly logs`.
+
+Fly-snapshots (retention, PowerShell):
+
+```powershell
+fly volumes list --app barnas-fristed-inspirasjon
+fly volumes update <volume-id> --snapshot-retention 14 --app barnas-fristed-inspirasjon
+fly volumes snapshots list <volume-id>
+```
+
+### Ta og sjekke en backup
+
+I `/admin` → **Vedlikehold** → *Ta sikkerhetskopi nå*. Hent siste kopi lokalt og verifiser den (påvirker ikke produksjon):
+
+```powershell
+fly ssh sftp get /data/backups/latest.sqlite.gz .\latest.sqlite.gz --app barnas-fristed-inspirasjon
+node server/restore-check.js .\latest.sqlite.gz
+```
+
+Utskriften viser `ok: true`, antall bilder per status, antall samtykkehendelser og siste innsending. Avslutningskode ≠ 0 betyr at kopien ikke kan brukes. Slett den nedlastede filen etterpå (den inneholder personopplysninger).
+
+> **Git Bash på Windows:** bash omskriver stier som starter med `/` (f.eks. `/data/...` blir `C:/Program Files/Git/data/...`) og tolker `\` som escape. Bruk PowerShell, eller i Git Bash: `MSYS_NO_PATHCONV=1 fly ssh sftp get /data/backups/latest.sqlite.gz ./latest.sqlite.gz --app barnas-fristed-inspirasjon` og `node server/restore-check.js ./latest.sqlite.gz` (skråstrek, ikke bakstrek).
+
+### Gjenopprette databasen (tap av volum eller korrupt database)
+
+1. Stopp skrivinger: `fly scale count 0 --app barnas-fristed-inspirasjon` (eller la appen stå hvis den ikke kjører).
+2. Alternativ A, Fly-snapshot: `fly volumes create inspiration_data --snapshot-id <snapshot-id> --region arn --app barnas-fristed-inspirasjon`.
+3. Alternativ B, appens kopi: verifiser filen med `node server/restore-check.js backup.sqlite.gz --to .\restored\photos.sqlite`, start deretter en maskin og kopier filen til `/data/photos.sqlite` med `fly ssh sftp shell`. Slett eventuelle gamle `photos.sqlite-wal`/`-shm`.
+4. Start appen (`fly scale count 1`) og sjekk `/health` og `/admin`.
+5. Kjør **Vedlikehold → Sjekk lagring mot database** og gå gjennom avviket under.
+
+Hvis en kopi må hentes fra Tigris i stedet: filene ligger i bucketen under `backups/photos-ÅÅÅÅMMDDTTMMSSZ.sqlite.gz` (bruk Fly/Tigris-dashboardet eller en S3-klient).
+
+### Avstemming mellom database og bilder
+
+*Sjekk lagring mot database* (`GET /api/admin/maintenance/reconcile`) er kun lesing og rapporterer:
+
+- `missingObjects`: databasen har en post, men bildet finnes ikke i Tigris. Bildet må hentes fra Tigris-bucket/annen kopi, ellers avvis/slett posten manuelt.
+- `pendingDeletions`: kunden/admin har slettet, men objektet ligger igjen. *Fullfør ventende slettinger* sletter dem trygt (de er allerede avpublisert).
+- `orphanObjects`: objekter uten databasepost (f.eks. mislykket opplasting). **Slettes ikke automatisk**; vurder manuelt og slett i Tigris hvis de ikke trengs. Etter en gjenoppretting kan nye bilder fra tiden etter siste kopi dukke opp her; slike mangler samtykkelogg og bør ikke publiseres.
+
+### Test av gjenoppretting
+
+Automatiske tester (`npm test`) tar en backup, verifiserer den med integritetssjekk, gjenoppretter til en ny database og kontrollerer innholdet. Gjør i tillegg en manuell øvelse etter første deploy og deretter ca. hver 3. måned: kommandoene under «Ta og sjekke en backup».
+
 ## API
 
 `GET /api/config`, `GET /api/gallery?page=0`, `GET /images/:id`, `POST /api/submit`, `POST /api/remove`, `GET /admin`, `GET /api/admin/photos`, `GET /api/admin/preview/:id`, `POST /api/admin/photos/:id/:action`.
