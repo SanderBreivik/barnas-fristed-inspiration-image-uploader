@@ -11,6 +11,7 @@ import {
 } from "@aws-sdk/client-s3";
 import {
   createHash,
+  randomBytes,
   randomUUID,
   timingSafeEqual
 } from "node:crypto";
@@ -60,6 +61,10 @@ const db = new Database(path.join(dataDir, "photos.sqlite"));
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 db.exec(readFileSync(path.join(root, "schema.sql"), "utf8"));
+// Additive migration: tracks whether the stored object is confirmed deleted.
+// Back up photos.sqlite before first deploy (see README).
+if (!db.prepare("PRAGMA table_info(photos)").all().some((c) => c.name === "storage_deleted_at"))
+  db.exec("ALTER TABLE photos ADD COLUMN storage_deleted_at TEXT");
 const s3 = new S3Client({
   region: env.S3_REGION || "auto",
   endpoint: env.S3_ENDPOINT,
@@ -105,13 +110,79 @@ const error = (res, message, status = 400) =>
   res.status(status).json({
     error: message
   });
+// ---- Admin auth: password -> server-side session in an HttpOnly cookie ----
+// Sessions live in memory (single Fly machine); a restart logs admins out.
+const SESSION_TTL_MS = Number(env.ADMIN_SESSION_TTL_MS) || 8 * 3600_000;
+const SESSION_IDLE_MS = Number(env.ADMIN_SESSION_IDLE_MS) || 30 * 60_000;
+const LOGIN_MAX_FAILS = Number(env.ADMIN_LOGIN_MAX_FAILS) || 5;
+const LOGIN_WINDOW_MS = Number(env.ADMIN_LOGIN_WINDOW_MS) || 15 * 60_000;
+const COOKIE = "__Host-bf_admin";
+const sessions = new Map(); // sid -> {csrf, created, last}
+const loginFails = new Map(); // ip hash -> {count, resetAt}
+const sweep = setInterval(() => {
+  const t = Date.now();
+  for (const [k, s] of sessions)
+    if (t - s.created > SESSION_TTL_MS || t - s.last > SESSION_IDLE_MS) sessions.delete(k);
+  for (const [k, f] of loginFails) if (f.resetAt < t) loginFails.delete(k);
+}, 60_000);
+sweep.unref();
+const safeEqual = (a, b) =>
+  timingSafeEqual(Buffer.from(sha(String(a)), "hex"), Buffer.from(sha(String(b)), "hex"));
+const readCookie = (req, name) => {
+  for (const part of (req.get("cookie") || "").split(";")) {
+    const i = part.indexOf("=");
+    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+  }
+  return "";
+};
+const sameOriginOnly = (req, res, next) =>
+  req.get("origin") === env.PUBLIC_ORIGIN ? next() : error(res, "Invalid origin", 403);
+const cookieOpts = (maxAge) =>
+  `Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${maxAge}`;
 const admin = (req, res, next) => {
-  const token = (req.get("authorization") || "").replace(/^Bearer /, "");
-  const a = Buffer.from(sha(token), "hex"),
-    b = Buffer.from(sha(env.ADMIN_PASSWORD), "hex");
-  if (!timingSafeEqual(a, b)) return error(res, "Unauthorized", 401);
+  res.set("Cache-Control", "no-store");
+  const sid = readCookie(req, COOKIE);
+  const s = sessions.get(sid);
+  const t = Date.now();
+  if (!s || t - s.created > SESSION_TTL_MS || t - s.last > SESSION_IDLE_MS) {
+    sessions.delete(sid);
+    return error(res, "Unauthorized", 401);
+  }
+  if (req.method !== "GET" && !safeEqual(req.get("x-csrf-token") || "", s.csrf))
+    return error(res, "Invalid CSRF token", 403);
+  s.last = t;
+  req.adminSession = sid;
   next();
 };
+app.post("/api/admin/login", sameOriginOnly, express.json({ limit: "2kb" }), (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const key = sha(req.ip || "unknown"), t = Date.now();
+  let f = loginFails.get(key);
+  if (!f || f.resetAt < t) loginFails.set(key, (f = { count: 0, resetAt: t + LOGIN_WINDOW_MS }));
+  if (f.count >= LOGIN_MAX_FAILS) {
+    res.set("Retry-After", String(Math.ceil((f.resetAt - t) / 1000)));
+    return error(res, "Too many attempts. Try again later.", 429);
+  }
+  const pw = req.body?.password;
+  if (typeof pw !== "string" || !safeEqual(pw, env.ADMIN_PASSWORD)) {
+    f.count++;
+    console.warn(JSON.stringify({ event: "admin_login_failed" }));
+    return error(res, "Unauthorized", 401);
+  }
+  loginFails.delete(key);
+  const sid = randomBytes(32).toString("hex"), csrf = randomBytes(32).toString("hex");
+  sessions.set(sid, { csrf, created: t, last: t });
+  res.set("Set-Cookie", `${COOKIE}=${sid}; ${cookieOpts(Math.floor(SESSION_TTL_MS / 1000))}`);
+  res.json({ ok: true, csrf });
+});
+app.post("/api/admin/logout", sameOriginOnly, admin, (req, res) => {
+  sessions.delete(req.adminSession);
+  res.set("Set-Cookie", `${COOKIE}=; ${cookieOpts(0)}`);
+  res.json({ ok: true });
+});
+app.get("/api/admin/session", admin, (req, res) =>
+  res.json({ ok: true, csrf: sessions.get(req.adminSession).csrf }),
+);
 const allowedHostnames = new Set([
   "barnasfristed.no",
   "www.barnasfristed.no",
@@ -161,6 +232,16 @@ const allowOrigin = (req, res, next) =>
   next() :
   error(res, "Invalid origin", 403);
 
+// Removal is also used from remove.html, which is served by this backend
+// (same-origin), so PUBLIC_ORIGIN is accepted in addition to storefront origins.
+// Authorization is the removal token, not the origin.
+const allowRemovalOrigin = (req, res, next) => {
+  const origin = req.get("origin");
+  return isAllowedOrigin(origin) || origin === env.PUBLIC_ORIGIN ?
+    next() :
+    error(res, "Invalid origin", 403);
+};
+
 app.use(cors);
 app.use(express.json({
   limit: "12kb"
@@ -209,13 +290,15 @@ async function del(key) {
     Key: key
   }));
 }
+// Indirection so tests can replace storage.
+export const storage = { put, get, del };
 app.get("/health", (_req, res) => res.json({
   ok: true
 }));
 app.get("/api/config", (_req, res) =>
   res.json({
     siteKey: env.TURNSTILE_SITE_KEY,
-    consentVersion: env.CONSENT_VERSION || "2026-10-v1",
+    consentVersion: CONSENT_VERSION,
   }),
 );
 app.get("/api/gallery", (req, res) => {
@@ -246,7 +329,7 @@ app.get("/images/:id", async (req, res) => {
       return error(res, "Not found", 404);
     }
 
-    const image = await get(row.object_key);
+    const image = await storage.get(row.object_key);
 
     res.set({
       "Content-Type": "image/webp",
@@ -270,11 +353,21 @@ const upload = multer({
   },
 });
 const CONSENT_TEXT =
-  "Jeg bekrefter at jeg har rett til å dele bildet, " +
-  "at jeg har innhentet nødvendige tillatelser fra " +
-  "eventuelle avbildede personer, og gir Barnas Fristed " +
-  "tillatelse til publisering i inspirasjonsgalleriet. " +
-  "Separat frivillig samtykke gjelder markedsføring.";
+  "Jeg bekrefter at jeg har rett til å dele bildet, og at jeg har " +
+  "innhentet nødvendige tillatelser fra personer som kan gjenkjennes i det. " +
+  "For bilder av barn bekrefter jeg at jeg er foresatt eller har foresattes " +
+  "tillatelse. Jeg gir Barnas Fristed tillatelse til å publisere bildet, " +
+  "og navn og beskrivelse hvis jeg har fylt dem ut, i inspirasjonsgalleriet " +
+  "på barnasfristed.no. Bildet gjennomgås før publisering. Jeg kan når som " +
+  "helst få bildet fjernet med slettelenken jeg får etter opplasting.";
+const MARKETING_TEXT =
+  "Valgfritt: Jeg gir i tillegg Barnas Fristed tillatelse til å bruke bildet " +
+  "i sosiale medier og annonser. Dette er ikke nødvendig for å delta i galleriet, " +
+  "og jeg kan trekke samtykket tilbake ved å slette bildet.";
+const CONSENT_VERSION = env.CONSENT_VERSION || "2026-10-v2";
+app.get("/api/consent", (_req, res) =>
+  res.json({ version: CONSENT_VERSION, galleryText: CONSENT_TEXT, marketingText: MARKETING_TEXT }),
+);
 app.post(
   "/api/submit",
   allowOrigin,
@@ -295,6 +388,8 @@ app.post(
         return error(res, "Verification failed", 403);
       if (req.body.galleryConsent !== "true")
         return error(res, "Gallery permission required");
+      if (req.body.consentVersion !== CONSENT_VERSION)
+        return error(res, "Samtykketeksten er oppdatert. Last siden på nytt og prøv igjen.", 409);
       if (!req.file) return error(res, "Image required");
       // Decode and re-encode on server to strip metadata and reject malformed input.
       const img = sharp(req.file.buffer, {
@@ -323,9 +418,11 @@ app.post(
       if (product && !/^[a-z0-9-]+$/.test(product))
         return error(res, "Invalid product");
       const marketing = req.body.marketingConsent === "true" ? 1 : 0,
-        version = env.CONSENT_VERSION || "2026-10-v1",
+        version = CONSENT_VERSION,
+        // Record exactly the text(s) the customer saw and agreed to.
+        consentRecord = marketing ? `${CONSENT_TEXT}\n---\n${MARKETING_TEXT}` : CONSENT_TEXT,
         timestamp = now();
-      await put(key, bytes);
+      await storage.put(key, bytes);
       try {
         db.transaction(() => {
           db.prepare(
@@ -338,7 +435,7 @@ app.post(
             product || null,
             marketing,
             version,
-            CONSENT_TEXT,
+            consentRecord,
             timestamp,
             sha(token),
           );
@@ -349,13 +446,13 @@ app.post(
             id,
             "submitted",
             version,
-            CONSENT_TEXT,
+            consentRecord,
             marketing,
             timestamp,
           );
         })();
       } catch (e) {
-        await del(key);
+        await storage.del(key);
         throw e;
       }
       res.status(201).json({
@@ -373,35 +470,54 @@ app.post(
 app.get("/remove.html", (_req, res) =>
   res.type("html").send(readFileSync(path.join(root, "remove.html"), "utf8")),
 );
-app.post("/api/remove", allowOrigin, async (req, res) => {
-  const {
-    id,
-    token
-  } = req.body || {};
-  const row = db
-    .prepare("SELECT object_key,removal_token_hash FROM photos WHERE id=?")
-    .get(id);
-  if (!row || !token || sha(token) !== row.removal_token_hash)
+// Customer removal. Order matters: unpublish in the DB first (so the image can
+// never be served again), then delete the object, then mark storage as deleted.
+// If object deletion fails the request returns 202 and a retry completes it.
+app.post("/api/remove", allowRemovalOrigin, async (req, res) => {
+  const { id, token } = req.body || {};
+  if (typeof id !== "string" || typeof token !== "string" || !id || !token)
     return error(res, "Invalid removal link", 403);
-  db.prepare("UPDATE photos SET status='deleted',deleted_at=? WHERE id=?").run(
-    now(),
-    id,
-  );
-  await del(row.object_key);
-  db.prepare(
-    "INSERT INTO consent_events(id,photo_id,action,version,consent_text,marketing_consent,created_at) VALUES(?,?,?,?,?,?,?)",
-  ).run(
-    randomUUID(),
-    id,
-    "withdrawn",
-    env.CONSENT_VERSION || "2026-10-v1",
-    "Withdrawal",
-    0,
-    now(),
-  );
-  res.json({
-    ok: true
-  });
+  const row = db
+    .prepare(
+      "SELECT object_key,removal_token_hash,status,storage_deleted_at FROM photos WHERE id=?",
+    )
+    .get(id);
+  const expected = Buffer.from(row?.removal_token_hash || sha("none"), "hex");
+  const given = Buffer.from(sha(token), "hex");
+  if (!row || !timingSafeEqual(given, expected))
+    return error(res, "Invalid removal link", 403);
+  if (row.status === "deleted" && row.storage_deleted_at)
+    return res.json({ ok: true, alreadyRemoved: true });
+  if (row.status !== "deleted") {
+    db.transaction(() => {
+      db.prepare("UPDATE photos SET status='deleted',deleted_at=? WHERE id=?").run(now(), id);
+      db.prepare(
+        "INSERT INTO consent_events(id,photo_id,action,version,consent_text,marketing_consent,created_at) VALUES(?,?,?,?,?,?,?)",
+      ).run(
+        randomUUID(),
+        id,
+        "withdrawn",
+        CONSENT_VERSION,
+        "Withdrawal",
+        0,
+        now(),
+      );
+    })();
+  }
+  try {
+    await storage.del(row.object_key);
+    db.prepare("UPDATE photos SET storage_deleted_at=? WHERE id=?").run(now(), id);
+  } catch (e) {
+    console.error(
+      JSON.stringify({ event: "storage_delete_failed", photoId: id, message: e?.message }),
+    );
+    return res.status(202).json({
+      ok: true,
+      pending: true,
+      message: "Bildet er fjernet fra galleriet. Sletting fullføres; prøv igjen senere.",
+    });
+  }
+  res.json({ ok: true });
 });
 app.get("/admin", (_req, res) =>
   res.type("html").send(readFileSync(path.join(root, "admin.html"), "utf8")),
@@ -424,7 +540,7 @@ app.get("/api/admin/preview/:id", admin, async (req, res) => {
       .prepare("SELECT object_key FROM photos WHERE id=?")
       .get(req.params.id);
     if (!row) return error(res, "Not found", 404);
-    res.set("Content-Type", "image/webp").send(await get(row.object_key));
+    res.set("Content-Type", "image/webp").send(await storage.get(row.object_key));
   } catch (e) {
     console.error(e);
     error(res, "Unavailable", 500);
@@ -437,8 +553,10 @@ app.post("/api/admin/photos/:id/:action", admin, async (req, res) => {
   } = req.params;
   if (!["approve", "reject", "delete"].includes(action))
     return error(res, "Invalid action");
-  const row = db.prepare("SELECT object_key FROM photos WHERE id=?").get(id);
+  const row = db.prepare("SELECT object_key,status FROM photos WHERE id=?").get(id);
   if (!row) return error(res, "Not found", 404);
+  if (row.status === "deleted" && action !== "delete")
+    return error(res, "Photo already deleted", 409);
   const status = {
     approve: "approved",
     reject: "rejected",
@@ -449,10 +567,15 @@ app.post("/api/admin/photos/:id/:action", admin, async (req, res) => {
   db.prepare(
     "UPDATE photos SET status=?,approved_at=CASE WHEN ?='approved' THEN ? ELSE approved_at END,deleted_at=CASE WHEN ?='deleted' THEN ? ELSE deleted_at END WHERE id=?",
   ).run(status, status, now(), status, now(), id);
-  if (action === "delete") await del(row.object_key);
+  if (action === "delete") {
+    await storage.del(row.object_key);
+    db.prepare("UPDATE photos SET storage_deleted_at=? WHERE id=?").run(now(), id);
+  }
   res.json({
     ok: true,
     status
   });
 });
-app.listen(Number(env.PORT || 8080), "0.0.0.0", () => console.log("Listening"));
+export { app, db };
+if (process.env.NODE_ENV !== "test")
+  app.listen(Number(env.PORT || 8080), "0.0.0.0", () => console.log("Listening"));

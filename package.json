@@ -1,6 +1,6 @@
 {
   "name":"barnas-fristed-inspirasjon","version":"0.1.0","private":true,"type":"module",
-  "scripts":{"start":"node server/index.js","check":"node --check server/index.js"},
+  "scripts":{"start":"node server/index.js","check":"node --check server/index.js","test":"node --test \"test/**/*.test.js\""},
   "engines":{"node":">=22"},
   "dependencies":{"@aws-sdk/client-s3":"^3.800.0","better-sqlite3":"^12.0.0","express":"^5.1.0","helmet":"^8.0.0","multer":"^2.0.0","sharp":"^0.34.0"}
 }

@@ -28,6 +28,23 @@ Tilpasset `barnas-fristed.myshopify.com` og `https://barnasfristed.no`. Kodegrun
 - **Caching:** Bilder kan ligge i nettleser- og mellomlagringscache i inntil 60 sekunder etter sletting.
 - **Ytterligere testing:** Kjør `npm install`, `npm run check`, funksjonelle tester, deploy-test og en fullstendig sikkerhetsgjennomgang før offentlig lansering.
 
+## Samtykke og oppbevaring (UTKAST – krever eiers og juridisk vurdering)
+
+Samtykketekstene ligger i `server/index.js` (`CONSENT_TEXT`, `MARKETING_TEXT`) og hentes av skjemaet via `GET /api/consent`, slik at skjema og logg alltid er identiske. Samtykkene er uavhengige: markedsføring er valgfritt og aldri en forutsetning for publisering. Ved hver innsending lagres nøyaktig tekst og versjon som ble vist. Endrer du teksten, **øk `CONSENT_VERSION`** (standard `2026-10-v2`; fjern en eventuell gammel `CONSENT_VERSION`-secret). Skjema med utdatert versjon avvises med 409.
+
+Foreslått oppbevaring (må godkjennes; ikke automatisert ennå, se Task 2.4):
+
+| Data | Oppbevaring |
+|---|---|
+| Godkjente bilder | Til kunden sletter, eller til butikken avslutter galleriet |
+| Ventende/avviste bilder | Foreslått maks 30 dager, deretter sletting |
+| Slettede bilder | Fjernes umiddelbart fra galleri og lagring; DB beholder kun metadata |
+| Samtykkelogg (`consent_events`, tekst, versjon, tidspunkt) | Foreslått 3 år som dokumentasjon, ingen bilder |
+| Hash av slettetoken | Så lenge posten finnes |
+| IP-hash for rate limit | Maks 1 time |
+
+Bilder med barn og gjenkjennelige personer: innsender bekrefter tillatelse (foresatt for barn); moderator bør avvise bilder der barn kan identifiseres uten åpenbar tillatelse. Fjerning: via slettelenken (vises og kan kopieres etter opplasting). Lenken kan ikke gjenopprettes; kunder som mister den må kontakte butikken, som kan slette via `/admin`.
+
 ## API
 
 `GET /api/config`, `GET /api/gallery?page=0`, `GET /images/:id`, `POST /api/submit`, `POST /api/remove`, `GET /admin`, `GET /api/admin/photos`, `GET /api/admin/preview/:id`, `POST /api/admin/photos/:id/:action`.
