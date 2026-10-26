@@ -8,6 +8,13 @@ import {
   reconcile,
   retryDeletions,
 } from "./maintenance.js";
+import { log, errFields, setAlertSink, drainCounts } from "./log.js";
+import {
+  createAlerter,
+  checkUncleanShutdown,
+  markCleanShutdown,
+  memorySnapshot,
+} from "./monitor.js";
 import multer from "multer";
 import {
   S3Client,
@@ -82,27 +89,20 @@ const s3 = new S3Client({
 });
 const bucket = env.S3_BUCKET;
 const app = express();
+// One JSON access-log line per request. Query strings are never logged (they
+// could contain tokens) and neither are IPs, bodies or cookies.
 app.use((req, res, next) => {
   const started = Date.now();
-
-  console.log(`[REQUEST] ${req.method} ${req.path}`);
-
   res.on("finish", () => {
-    console.log(
-      `[RESPONSE] ${req.method} ${req.path} ` +
-      `${res.statusCode} (${Date.now() - started}ms)`,
-    );
+    if (req.path === "/health" || req.path === "/health/deep") return;
+    const status = res.statusCode;
+    const fn = status >= 500 ? log.error : status >= 400 ? log.warn : log.info;
+    fn("request", { method: req.method, path: req.path, status, ms: Date.now() - started });
   });
-
   res.on("close", () => {
-    if (!res.writableFinished) {
-      console.warn(
-        `[DISCONNECTED] ${req.method} ${req.path} ` +
-        `after ${Date.now() - started}ms`,
-      );
-    }
+    if (!res.writableFinished)
+      log.warn("client_aborted", { method: req.method, path: req.path, ms: Date.now() - started });
   });
-
   next();
 });
 app.disable("x-powered-by");
@@ -173,7 +173,7 @@ app.post("/api/admin/login", sameOriginOnly, express.json({ limit: "2kb" }), (re
   const pw = req.body?.password;
   if (typeof pw !== "string" || !safeEqual(pw, env.ADMIN_PASSWORD)) {
     f.count++;
-    console.warn(JSON.stringify({ event: "admin_login_failed" }));
+    log.warn("admin_login_failed");
     return error(res, "Unauthorized", 401);
   }
   loginFails.delete(key);
@@ -297,16 +297,21 @@ async function del(key) {
     Key: key
   }));
 }
-async function list(prefix) {
+async function list(prefix, maxKeys) {
   const out = [];
   let token;
   do {
     const r = await s3.send(
-      new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }),
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: prefix,
+        ContinuationToken: token,
+        ...(maxKeys ? { MaxKeys: maxKeys } : {}),
+      }),
     );
     for (const o of r.Contents || [])
       out.push({ key: o.Key, size: o.Size, lastModified: o.LastModified });
-    token = r.IsTruncated ? r.NextContinuationToken : undefined;
+    token = !maxKeys && r.IsTruncated ? r.NextContinuationToken : undefined;
   } while (token);
   return out;
 }
@@ -315,6 +320,33 @@ export const storage = { put, get, del, list };
 app.get("/health", (_req, res) => res.json({
   ok: true
 }));
+// Dependency check (database + object storage). Cached briefly so uptime
+// monitors cannot turn it into load. Returns booleans only, no details.
+let healthCache = { at: 0, result: null };
+async function deepHealth() {
+  const ttl = num(env.HEALTH_CACHE_MS, 30_000);
+  if (healthCache.result && Date.now() - healthCache.at < ttl) return healthCache.result;
+  const result = { db: false, storage: false };
+  try {
+    db.prepare("SELECT 1").get();
+    result.db = true;
+  } catch (e) {
+    log.error("db_error", errFields(e));
+  }
+  try {
+    await storage.list("photos/", 1);
+    result.storage = true;
+  } catch (e) {
+    log.error("storage_health_failed", errFields(e));
+  }
+  result.ok = result.db && result.storage;
+  healthCache = { at: Date.now(), result };
+  return result;
+}
+app.get("/health/deep", async (_req, res) => {
+  const r = await deepHealth();
+  res.status(r.ok ? 200 : 503).json(r);
+});
 app.get("/api/config", (_req, res) =>
   res.json({
     siteKey: env.TURNSTILE_SITE_KEY,
@@ -360,7 +392,7 @@ app.get("/images/:id", async (req, res) => {
 
     res.send(image);
   } catch (e) {
-    console.error(e);
+    log.error("image_serve_failed", errFields(e));
     error(res, "Image unavailable", 500);
   }
 });
@@ -417,7 +449,7 @@ const cleanupLimits = () => {
   try {
     db.prepare("DELETE FROM request_limits WHERE expires_at<?").run(nowS());
   } catch (e) {
-    console.error(JSON.stringify({ event: "limit_cleanup_failed", message: e?.message }));
+    log.error("limit_cleanup_failed", errFields(e));
   }
 };
 cleanupLimits();
@@ -436,7 +468,7 @@ const submitAbuseLimit = (req, res, next) => {
 const uploadOne = (req, res, next) =>
   upload.single("image")(req, res, (err) => {
     if (!err) return next();
-    console.warn(JSON.stringify({ event: "upload_rejected", code: err.code || "unknown" }));
+    log.warn("upload_rejected", { code: err.code || "unknown" });
     if (err.code === "LIMIT_FILE_SIZE")
       return error(res, "Bildet er for stort (maks 8 MB).", 413);
     return error(res, "Ugyldig opplasting.", 400);
@@ -461,7 +493,7 @@ app.post(
         return error(res, "Du har sendt inn mange bilder nylig. Prøv igjen i morgen.", 429);
       }
       if (!(await turnstile(clean(req.body.turnstileToken, 4096), req.ip))) {
-        console.warn(JSON.stringify({ event: "turnstile_failed" }));
+        log.warn("turnstile_failed");
         return error(res, "Verifiseringen feilet. Last inn siden på nytt og prøv igjen.", 403);
       }
       if (req.body.galleryConsent !== "true")
@@ -501,7 +533,7 @@ app.post(
           })
           .toBuffer();
       } catch (e) {
-        console.warn(JSON.stringify({ event: "image_rejected", message: e?.message }));
+        log.warn("image_rejected", errFields(e));
         return error(res, "Ugyldig eller skadet bilde.", 400);
       } finally {
         processing--;
@@ -520,7 +552,7 @@ app.post(
       try {
         await storage.put(key, bytes);
       } catch (e) {
-        console.error(JSON.stringify({ event: "storage_put_failed", message: e?.message }));
+        log.error("storage_put_failed", errFields(e));
         return error(res, "Kunne ikke lagre bildet. Prøv igjen senere.", 502);
       }
       try {
@@ -555,7 +587,7 @@ app.post(
         try {
           await storage.del(key);
         } catch {
-          console.error(JSON.stringify({ event: "orphan_object", key }));
+          log.error("orphan_object", { objectKey: key });
         }
         throw e;
       }
@@ -567,7 +599,7 @@ app.post(
         message: "Bildet er sendt til godkjenning.",
       });
     } catch (e) {
-      console.error(JSON.stringify({ event: "submit_failed", message: e?.message }));
+      log.error("submit_failed", errFields(e));
       error(res, "Noe gikk galt under opplasting. Prøv igjen senere.", 500);
     }
   },
@@ -599,9 +631,7 @@ app.post("/api/remove/preview", allowRemovalOrigin, async (req, res) => {
     });
     res.send(image);
   } catch (e) {
-    console.error(
-      JSON.stringify({ event: "removal_preview_failed", photoId: id, message: e?.message }),
-    );
+    log.error("removal_preview_failed", { photoId: id, ...errFields(e) });
     error(res, "Preview unavailable", 500);
   }
 });
@@ -643,9 +673,7 @@ app.post("/api/remove", allowRemovalOrigin, async (req, res) => {
     await storage.del(row.object_key);
     db.prepare("UPDATE photos SET storage_deleted_at=? WHERE id=?").run(now(), id);
   } catch (e) {
-    console.error(
-      JSON.stringify({ event: "storage_delete_failed", photoId: id, message: e?.message }),
-    );
+    log.error("storage_delete_failed", { photoId: id, source: "customer", ...errFields(e) });
     return res.status(202).json({
       ok: true,
       pending: true,
@@ -677,7 +705,7 @@ app.get("/api/admin/preview/:id", admin, async (req, res) => {
     if (!row) return error(res, "Not found", 404);
     res.set("Content-Type", "image/webp").send(await storage.get(row.object_key));
   } catch (e) {
-    console.error(e);
+    log.error("admin_preview_failed", errFields(e));
     error(res, "Unavailable", 500);
   }
 });
@@ -703,8 +731,14 @@ app.post("/api/admin/photos/:id/:action", admin, async (req, res) => {
     "UPDATE photos SET status=?,approved_at=CASE WHEN ?='approved' THEN ? ELSE approved_at END,deleted_at=CASE WHEN ?='deleted' THEN ? ELSE deleted_at END WHERE id=?",
   ).run(status, status, now(), status, now(), id);
   if (action === "delete") {
-    await storage.del(row.object_key);
-    db.prepare("UPDATE photos SET storage_deleted_at=? WHERE id=?").run(now(), id);
+    try {
+      await storage.del(row.object_key);
+      db.prepare("UPDATE photos SET storage_deleted_at=? WHERE id=?").run(now(), id);
+    } catch (e) {
+      // Already unpublished; "Fullfør ventende slettinger" in /admin retries it.
+      log.error("storage_delete_failed", { photoId: id, source: "admin", ...errFields(e) });
+      return res.status(202).json({ ok: true, status, pending: true });
+    }
   }
   res.json({
     ok: true,
@@ -717,10 +751,10 @@ const maint = () => ({ db, storage, dataDir, keep: BACKUP_KEEP });
 app.post("/api/admin/backup", sameOriginOnly, admin, async (_req, res) => {
   try {
     const r = await backupDatabase(maint());
-    console.log(JSON.stringify({ event: "backup_ok", key: r.key, bytes: r.bytes, pruned: r.pruned, manual: true }));
+    log.info("backup_ok", { objectKey: r.key, bytes: r.bytes, pruned: r.pruned, manual: true });
     res.json({ ok: true, ...r });
   } catch (e) {
-    console.error(JSON.stringify({ event: "backup_failed", message: e?.message }));
+    log.error("backup_failed", errFields(e));
     error(res, "Backup failed", 500);
   }
 });
@@ -728,7 +762,7 @@ app.get("/api/admin/maintenance/reconcile", admin, async (_req, res) => {
   try {
     res.json(await reconcile({ db, storage }));
   } catch (e) {
-    console.error(JSON.stringify({ event: "reconcile_failed", message: e?.message }));
+    log.error("reconcile_failed", errFields(e));
     error(res, "Reconcile failed", 500);
   }
 });
@@ -736,7 +770,7 @@ app.post("/api/admin/maintenance/retry-deletions", sameOriginOnly, admin, async 
   try {
     res.json({ ok: true, ...(await retryDeletions({ db, storage })) });
   } catch (e) {
-    console.error(JSON.stringify({ event: "retry_deletions_failed", message: e?.message }));
+    log.error("retry_deletions_failed", errFields(e));
     error(res, "Retry failed", 500);
   }
 });
@@ -745,14 +779,100 @@ if (process.env.NODE_ENV !== "test" && !process.env.NO_LISTEN && env.BACKUP_ENAB
   const tick = async () => {
     try {
       const r = await backupIfDue({ ...maint(), intervalHours: num(env.BACKUP_INTERVAL_HOURS, 24) });
-      if (r) console.log(JSON.stringify({ event: "backup_ok", key: r.key, bytes: r.bytes, pruned: r.pruned }));
+      if (r) log.info("backup_ok", { objectKey: r.key, bytes: r.bytes, pruned: r.pruned });
     } catch (e) {
-      console.error(JSON.stringify({ event: "backup_failed", message: e?.message }));
+      log.error("backup_failed", errFields(e));
     }
   };
   setTimeout(tick, 60_000).unref();
   setInterval(tick, 3600_000).unref();
 }
+// ---- Error handling & monitoring ------------------------------------------
+// Must come after all routes. Never leaks error details to the client.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 500 ? err.status : 500;
+  if (status >= 500)
+    log.error("unhandled_error", { method: req.method, path: req.path, ...errFields(err) });
+  else log.warn("bad_request", { method: req.method, path: req.path, status });
+  error(res, status >= 500 ? "Internal error" : "Bad request", status);
+});
 export { app, db };
-if (process.env.NODE_ENV !== "test" && !process.env.NO_LISTEN)
-  app.listen(Number(env.PORT || 8080), "0.0.0.0", () => console.log("Listening"));
+const live = process.env.NODE_ENV !== "test" && !process.env.NO_LISTEN;
+if (live) {
+  const alertUrl = env.ALERT_WEBHOOK_URL;
+  setAlertSink(
+    createAlerter({ url: alertUrl, throttleMs: num(env.ALERT_THROTTLE_S, 900) * 1000 }),
+  );
+  if (!alertUrl) log.warn("alerts_disabled", { message: "ALERT_WEBHOOK_URL not set" });
+  const prev = checkUncleanShutdown(dataDir);
+  log.info("startup", { node: process.version, unclean: prev.unclean });
+  if (prev.unclean)
+    log.error("unclean_restart", {
+      previousStart: prev.previousStart,
+      message: `previous run ended abruptly (possible crash or out-of-memory), started ${prev.previousStart}`,
+    });
+
+  // Memory watch: warn early (before the kernel OOM-kills the process) and log
+  // a metrics line every 5 minutes with counts of events since the last one.
+  const memLimit = Number(env.MEMORY_LIMIT_MB) || undefined;
+  let ticks = 0;
+  setInterval(() => {
+    const m = memorySnapshot(memLimit);
+    if (m.ratio > num(env.MEMORY_WARN_RATIO, 0.85))
+      log.warn("memory_high", {
+        rssMb: m.rssMb,
+        limitMb: m.limitMb,
+        message: `rss ${m.rssMb} MB of ${m.limitMb} MB`,
+      });
+    if (++ticks % 5 === 0) {
+      const counts = Object.fromEntries(
+        Object.entries(drainCounts()).map(([k, v]) => [`n_${k}`, v]),
+      );
+      log.info("metrics", {
+        rssMb: m.rssMb,
+        heapMb: m.heapMb,
+        processing,
+        adminSessions: sessions.size,
+        ...counts,
+      });
+    }
+  }, 60_000).unref();
+
+  // Active dependency check: alerts if the database or Tigris stops answering.
+  setInterval(async () => {
+    healthCache = { at: 0, result: null };
+    const r = await deepHealth();
+    if (!r.ok)
+      log.error("health_check_failed", {
+        db: r.db,
+        storage: r.storage,
+        message: `db=${r.db} storage=${r.storage}`,
+      });
+  }, 300_000).unref();
+
+  process.on("uncaughtException", (e) => {
+    log.fatal("uncaught_exception", errFields(e));
+    setTimeout(() => process.exit(1), 1500); // let the alert go out; Fly restarts us
+  });
+  process.on("unhandledRejection", (e) => log.error("unhandled_rejection", errFields(e)));
+
+  const server = app.listen(Number(env.PORT || 8080), "0.0.0.0", () =>
+    log.info("listening", { port: Number(env.PORT || 8080) }),
+  );
+  const shutdown = (signal) => {
+    log.info("shutdown", { signal });
+    markCleanShutdown(dataDir); // so the next start is not reported as a crash
+    server.close(() => {
+      try {
+        db.close();
+      } catch {
+        /* ignore */
+      }
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(0), 4000).unref();
+  };
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+}

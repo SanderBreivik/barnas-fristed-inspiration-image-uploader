@@ -104,3 +104,11 @@ Automatiske tester (`npm test`) tar en backup, verifiserer den med integritetssj
 ## API
 
 `GET /api/config`, `GET /api/gallery?page=0`, `GET /images/:id`, `POST /api/submit`, `POST /api/remove`, `GET /admin`, `GET /api/admin/photos`, `GET /api/admin/preview/:id`, `POST /api/admin/photos/:id/:action`.
+
+## Overvåking og logging
+
+- Alle logger er JSON-linjer (`fly logs --app barnas-fristed-inspirasjon`). Passord, tokens, cookies og bildedata blir aldri logget; IP og query-strenger logges ikke.
+- `/health` er enkel liveness-sjekk (brukes av Fly). `/health/deep` sjekker database og lagring (200/503) – bruk den i en ekstern oppetidsmonitor (f.eks. UptimeRobot).
+- Varsler sendes til en webhook (Slack/Discord) ved: `unclean_restart` (krasj/OOM), `memory_high`, `health_check_failed`, `backup_failed`, `storage_delete_failed`, `storage_put_failed`, `orphan_object`, `submit_failed`, `db_error`, `uncaught_exception`, `unhandled_rejection`. Maks ett varsel per hendelse per 15 min.
+- Aktiver: `fly secrets set ALERT_WEBHOOK_URL="https://..." --app barnas-fristed-inspirasjon`
+- En `metrics`-linje (minne, økter, hendelsestellere) logges hvert 5. minutt.
