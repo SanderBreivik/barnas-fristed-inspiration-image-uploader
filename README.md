@@ -10,7 +10,7 @@ Tilpasset `barnas-fristed.myshopify.com` og `https://barnasfristed.no`. Kodegrun
 2. Opprett en Tigris-bucket (via Fly.io eller separat). Noter S3-endepunkt, bucket og tilgangsnøkler. Bucket skal være **privat**.
 3. Endre `app` i `fly.toml` til et ledig navn. Kjør `fly launch --no-deploy` og kontroller konfigurasjonen.
 4. Opprett SQLite-volume i valgt region: `fly volumes create inspiration_data --region arn --size 1` (velg størrelse etter behov).
-5. Sett hemmeligheter: `fly secrets set PUBLIC_ORIGIN=https://DIN-APP.fly.dev TURNSTILE_SITE_KEY=... TURNSTILE_SECRET=... ADMIN_PASSWORD=... S3_ENDPOINT=... S3_BUCKET=... S3_ACCESS_KEY_ID=... S3_SECRET_ACCESS_KEY=...`.
+5. Sett hemmeligheter: `fly secrets set PUBLIC_ORIGIN=https://DIN-APP.fly.dev TURNSTILE_SITE_KEY=... TURNSTILE_SECRET=... ADMIN_PASSWORD=...` (minst 24 tegn). Tigris-nøklene (`AWS_ENDPOINT_URL_S3`, `BUCKET_NAME`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) settes automatisk av `fly storage create`.
 6. Lag Turnstile-widget med `barnasfristed.no` som tillatt hostname.
 7. Kjør `fly deploy`. Test `https://DIN-APP.fly.dev/health`.
 8. Shopify Admin → Nettbutikk → Sider → lag siden «Inspirasjon» med handle `inspirasjon`. Legg inn Custom Liquid via passende sidemal i temaredigereren og lim inn `shopify/inspirasjon.liquid`. Bytt `DIN-FLY-APP` med appens faktiske hostname.
@@ -30,7 +30,7 @@ Tilpasset `barnas-fristed.myshopify.com` og `https://barnasfristed.no`. Kodegrun
 
 ## Samtykke og oppbevaring (UTKAST – krever eiers og juridisk vurdering)
 
-Samtykketekstene ligger i `server/index.js` (`CONSENT_TEXT`, `MARKETING_TEXT`) og hentes av skjemaet via `GET /api/consent`, slik at skjema og logg alltid er identiske. Samtykkene er uavhengige: markedsføring er valgfritt og aldri en forutsetning for publisering. Ved hver innsending lagres nøyaktig tekst og versjon som ble vist. Endrer du teksten, **øk `CONSENT_VERSION`** (standard `2026-10-v2`; fjern en eventuell gammel `CONSENT_VERSION`-secret). Skjema med utdatert versjon avvises med 409.
+Samtykketekstene ligger i `server/consent.js` (`CONSENT_TEXT`, `MARKETING_TEXT`) og hentes av skjemaet via `GET /api/consent`, slik at skjema og logg alltid er identiske. Samtykkene er uavhengige: markedsføring er valgfritt og aldri en forutsetning for publisering. Ved hver innsending lagres nøyaktig tekst og versjon som ble vist. Endrer du teksten, **øk `CONSENT_VERSION`** (standard `2026-10-v2`; fjern en eventuell gammel `CONSENT_VERSION`-secret). Skjema med utdatert versjon avvises med 409.
 
 Foreslått oppbevaring (må godkjennes). Automatisk håndhevelse er implementert, men **av som standard** (se «Automatisk opprydding» under):
 
@@ -151,6 +151,14 @@ Tillatt er `barnasfristed.no`, `www.barnasfristed.no`, `barnas-fristed.myshopify
 
 - Alle logger er JSON-linjer (`fly logs --app barnas-fristed-inspirasjon`). Passord, tokens, cookies og bildedata blir aldri logget; IP og query-strenger logges ikke.
 - `/health` er enkel liveness-sjekk (brukes av Fly). `/health/deep` sjekker database og lagring (200/503) – bruk den i en ekstern oppetidsmonitor (f.eks. UptimeRobot).
-- Varsler sendes til en webhook (Slack/Discord) ved: `unclean_restart` (krasj/OOM), `memory_high`, `health_check_failed`, `backup_failed`, `storage_delete_failed`, `storage_put_failed`, `orphan_object`, `submit_failed`, `db_error`, `uncaught_exception`, `unhandled_rejection`. Maks ett varsel per hendelse per 15 min.
-- Aktiver: `fly secrets set ALERT_WEBHOOK_URL="https://..." --app barnas-fristed-inspirasjon`
-- En `metrics`-linje (minne, økter, hendelsestellere) logges hvert 5. minutt.
+- Fly sjekker `/health` automatisk. Metrikker og varsler settes opp i Fly sitt Grafana-dashbord (`fly dashboard metrics`); appen sender ikke egne varsler.
+- Nyttige loggfeil å varsle på: `backup_failed`, `storage_delete_failed`, `uncaught_exception`.
+
+## Drift og feilsøking
+
+- **Tester:** `npm test` (kjører `node --test "test/**/*.test.js"`), `npm run check` for syntaks.
+- **Deploy (PowerShell):** `fly deploy --app barnas-fristed-inspirasjon`, deretter `curl https://barnas-fristed-inspirasjon.fly.dev/health/deep`. Lim inn oppdatert `shopify/inspirasjon.liquid` i Shopify ved endringer der.
+- **Appen starter ikke:** `fly logs` viser `Missing <NAVN>` for manglende miljøvariabel.
+- **Skjema avvises med 409:** utdatert samtykkeversjon. Sjekk `fly secrets list` for en gammel `CONSENT_VERSION`.
+- **CORS-feil i nettleseren:** se «Tillatte opprinnelser».
+- **Bilder mangler:** kjør *Sjekk lagring mot database* i `/admin`.
