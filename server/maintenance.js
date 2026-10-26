@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { gunzipSync, gzipSync } from "node:zlib";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
@@ -149,3 +150,68 @@ export async function retryDeletions({ db, storage }) {
   }
   return { done, failed };
 }
+
+const DAY = 86_400_000;
+
+// Retention enforcement. Defaults follow the draft policy in README.md and
+// must be approved by the owner before RETENTION_ENABLED is switched on.
+//  - pending/rejected photos older than `pendingDays` are expired (unpublished,
+//    consent event "expired", object deleted from storage)
+//  - personal text (name, description) is scrubbed from deleted rows after `scrubDays`
+//  - consent log entries of deleted photos older than `consentDays` are removed
+// With apply=false nothing is changed; the report shows what would happen.
+export async function enforceRetention({
+  db,
+  storage,
+  apply = false,
+  now = Date.now(),
+  pendingDays = 30,
+  scrubDays = 30,
+  consentDays = 1095,
+  batch = 200,
+  version = "retention",
+}) {
+  const iso = (days) => new Date(now - days * DAY).toISOString();
+  const ts = new Date(now).toISOString();
+  const expiring = db
+    .prepare(
+      "SELECT id,object_key FROM photos WHERE status IN ('pending','rejected') AND submitted_at < ? ORDER BY submitted_at LIMIT ?",
+    )
+    .all(iso(pendingDays), batch);
+  const scrubSql =
+    "FROM photos WHERE status='deleted' AND storage_deleted_at IS NOT NULL AND deleted_at < ? AND (display_name IS NOT NULL OR description IS NOT NULL)";
+  const scrubCount = db.prepare(`SELECT count(*) c ${scrubSql}`).get(iso(scrubDays)).c;
+  const consentSql =
+    "FROM consent_events WHERE created_at < ? AND photo_id IN (SELECT id FROM photos WHERE status='deleted' AND storage_deleted_at IS NOT NULL)";
+  const consentCount = db.prepare(`SELECT count(*) c ${consentSql}`).get(iso(consentDays)).c;
+
+  const report = {
+    apply,
+    expiredPhotos: expiring.length,
+    scrubbedRows: scrubCount,
+    purgedConsentEvents: consentCount,
+    storageFailures: [],
+  };
+  if (!apply) return report;
+
+  for (const p of expiring) {
+    db.transaction(() => {
+      db.prepare("UPDATE photos SET status='deleted',deleted_at=? WHERE id=?").run(ts, p.id);
+      db.prepare(
+        "INSERT INTO consent_events(id,photo_id,action,version,consent_text,marketing_consent,created_at) VALUES(?,?,?,?,?,?,?)",
+      ).run(randomUUID(), p.id, "expired", version, "Retention period ended", 0, ts);
+    })();
+    try {
+      await storage.del(p.object_key);
+      db.prepare("UPDATE photos SET storage_deleted_at=? WHERE id=?").run(ts, p.id);
+    } catch {
+      report.storageFailures.push(p.id); // retryDeletions finishes it later
+    }
+  }
+  db.prepare(
+    `UPDATE photos SET display_name=NULL,description=NULL WHERE id IN (SELECT id ${scrubSql})`,
+  ).run(iso(scrubDays));
+  db.prepare(`DELETE ${consentSql}`).run(iso(consentDays));
+  return report;
+}
+

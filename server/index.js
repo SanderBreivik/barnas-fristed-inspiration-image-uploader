@@ -5,6 +5,7 @@ import sharp from "sharp";
 import {
   backupDatabase,
   backupIfDue,
+  enforceRetention,
   reconcile,
   retryDeletions,
 } from "./maintenance.js";
@@ -768,6 +769,26 @@ app.post("/api/admin/maintenance/retry-deletions", sameOriginOnly, admin, async 
     error(res, "Retry failed", 500);
   }
 });
+// Retention (see README). Preview by default; `{"apply":true}` really deletes.
+const retentionOpts = () => ({
+  db,
+  storage,
+  pendingDays: num(env.RETENTION_PENDING_DAYS, 30),
+  scrubDays: num(env.RETENTION_SCRUB_DAYS, 30),
+  consentDays: num(env.RETENTION_CONSENT_DAYS, 1095),
+  version: CONSENT_VERSION,
+});
+app.post("/api/admin/maintenance/retention", sameOriginOnly, admin, async (req, res) => {
+  try {
+    const apply = req.body?.apply === true;
+    const r = await enforceRetention({ ...retentionOpts(), apply });
+    if (apply) log.info("retention_applied", { expired: r.expiredPhotos, scrubbed: r.scrubbedRows, consentPurged: r.purgedConsentEvents, failures: r.storageFailures.length });
+    res.json({ ok: true, ...r });
+  } catch (e) {
+    log.error("retention_failed", errFields(e));
+    error(res, "Retention failed", 500);
+  }
+});
 // Daily automatic backup. Checks hourly so a restart never skips or duplicates one.
 if (process.env.NODE_ENV !== "test" && !process.env.NO_LISTEN && env.BACKUP_ENABLED !== "false") {
   const tick = async () => {
@@ -776,6 +797,16 @@ if (process.env.NODE_ENV !== "test" && !process.env.NO_LISTEN && env.BACKUP_ENAB
       if (r) log.info("backup_ok", { objectKey: r.key, bytes: r.bytes, pruned: r.pruned });
     } catch (e) {
       log.error("backup_failed", errFields(e));
+    }
+    // Opt-in: nothing is deleted automatically until the owner approves the policy.
+    if (env.RETENTION_ENABLED === "true") {
+      try {
+        const r = await enforceRetention({ ...retentionOpts(), apply: true });
+        if (r.expiredPhotos || r.scrubbedRows || r.purgedConsentEvents || r.storageFailures.length)
+          log.info("retention_applied", { expired: r.expiredPhotos, scrubbed: r.scrubbedRows, consentPurged: r.purgedConsentEvents, failures: r.storageFailures.length });
+      } catch (e) {
+        log.error("retention_failed", errFields(e));
+      }
     }
   };
   setTimeout(tick, 60_000).unref();

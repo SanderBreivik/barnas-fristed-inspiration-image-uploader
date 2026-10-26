@@ -32,7 +32,7 @@ Tilpasset `barnas-fristed.myshopify.com` og `https://barnasfristed.no`. Kodegrun
 
 Samtykketekstene ligger i `server/index.js` (`CONSENT_TEXT`, `MARKETING_TEXT`) og hentes av skjemaet via `GET /api/consent`, slik at skjema og logg alltid er identiske. Samtykkene er uavhengige: markedsføring er valgfritt og aldri en forutsetning for publisering. Ved hver innsending lagres nøyaktig tekst og versjon som ble vist. Endrer du teksten, **øk `CONSENT_VERSION`** (standard `2026-10-v2`; fjern en eventuell gammel `CONSENT_VERSION`-secret). Skjema med utdatert versjon avvises med 409.
 
-Foreslått oppbevaring (må godkjennes; ikke automatisert ennå, se Task 2.4):
+Foreslått oppbevaring (må godkjennes). Automatisk håndhevelse er implementert, men **av som standard** (se «Automatisk opprydding» under):
 
 | Data | Oppbevaring |
 |---|---|
@@ -44,6 +44,15 @@ Foreslått oppbevaring (må godkjennes; ikke automatisert ennå, se Task 2.4):
 | IP-hash for rate limit | Maks 1 time |
 
 Bilder med barn og gjenkjennelige personer: innsender bekrefter tillatelse (foresatt for barn); moderator bør avvise bilder der barn kan identifiseres uten åpenbar tillatelse. Fjerning: via slettelenken (vises og kan kopieres etter opplasting). Lenken kan ikke gjenopprettes; kunder som mister den må kontakte butikken, som kan slette via `/admin`.
+
+### Automatisk opprydding
+
+- Ventende/avviste bilder eldre enn 30 dager utløper: avpubliseres, slettes fra lagring og får en `expired`-hendelse i samtykkeloggen.
+- Navn og beskrivelse fjernes fra slettede rader etter 30 dager. Samtykkelogg for slettede bilder fjernes etter 3 år.
+- **Forhåndsvisning (endrer ingenting):** logg inn på `/admin` og kall `POST /api/admin/maintenance/retention` (tom body). Svaret viser hvor mye som ville blitt ryddet. Med `{"apply":true}` utføres det.
+- **Automatisk daglig kjøring** er av til du setter `fly secrets set RETENTION_ENABLED=true`. Gjør det først når perioden er godkjent. Verdier kan justeres med `RETENTION_PENDING_DAYS`, `RETENTION_SCRUB_DAYS` og `RETENTION_CONSENT_DAYS`.
+- Maks 200 bilder per kjøring. Mislykket sletting fra lagring fullføres av «Fullfør ventende slettinger».
+- Backuper (14 stk) kan inneholde data som allerede er ryddet bort, i opptil 14 dager.
 
 ## Backup og gjenoppretting
 
