@@ -368,49 +368,124 @@ const CONSENT_VERSION = env.CONSENT_VERSION || "2026-10-v2";
 app.get("/api/consent", (_req, res) =>
   res.json({ version: CONSENT_VERSION, galleryText: CONSENT_TEXT, marketingText: MARKETING_TEXT }),
 );
+// ---- Upload limits ---------------------------------------------------------
+// Two independent counters in request_limits (keys are salted-free IP hashes):
+//  * abuse:<ip>  every POST to /api/submit, counted up front. Stops floods.
+//  * quota:<ip>  successful uploads only. Invalid/failed uploads never use it.
+// Defaults: 30 attempts / 10 min, 10 successful uploads / 24 h. Override with
+// SUBMIT_ABUSE_MAX, SUBMIT_ABUSE_WINDOW_S, SUBMIT_QUOTA_MAX, SUBMIT_QUOTA_WINDOW_S.
+const num = (v, d) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d);
+const LIMITS = {
+  abuseMax: num(env.SUBMIT_ABUSE_MAX, 30),
+  abuseWindow: num(env.SUBMIT_ABUSE_WINDOW_S, 600),
+  quotaMax: num(env.SUBMIT_QUOTA_MAX, 10),
+  quotaWindow: num(env.SUBMIT_QUOTA_WINDOW_S, 86400),
+};
+const nowS = () => Math.floor(Date.now() / 1000);
+const limitRow = (key) => {
+  const r = db.prepare("SELECT count,expires_at FROM request_limits WHERE key=?").get(key);
+  return r && r.expires_at > nowS() ? r : null;
+};
+const hit = (key, windowS) => {
+  const t = nowS();
+  db.prepare(
+    "INSERT INTO request_limits(key,count,expires_at) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=CASE WHEN expires_at<=? THEN 1 ELSE count+1 END,expires_at=CASE WHEN expires_at<=? THEN ? ELSE expires_at END",
+  ).run(key, t + windowS, t, t, t + windowS);
+};
+const retryAfter = (r) => String(Math.max(1, r.expires_at - nowS()));
+const cleanupLimits = () => {
+  try {
+    db.prepare("DELETE FROM request_limits WHERE expires_at<?").run(nowS());
+  } catch (e) {
+    console.error(JSON.stringify({ event: "limit_cleanup_failed", message: e?.message }));
+  }
+};
+cleanupLimits();
+setInterval(cleanupLimits, 600_000).unref();
+const submitAbuseLimit = (req, res, next) => {
+  const key = "abuse:" + sha(req.ip || "unknown");
+  const r = limitRow(key);
+  if (r && r.count >= LIMITS.abuseMax) {
+    res.set("Retry-After", retryAfter(r));
+    return error(res, "For mange forsøk. Vent noen minutter og prøv igjen.", 429);
+  }
+  hit(key, LIMITS.abuseWindow);
+  next();
+};
+// Multer errors happen before the route handler; map them to clear messages.
+const uploadOne = (req, res, next) =>
+  upload.single("image")(req, res, (err) => {
+    if (!err) return next();
+    console.warn(JSON.stringify({ event: "upload_rejected", code: err.code || "unknown" }));
+    if (err.code === "LIMIT_FILE_SIZE")
+      return error(res, "Bildet er for stort (maks 8 MB).", 413);
+    return error(res, "Ugyldig opplasting.", 400);
+  });
+// Sharp is memory hungry; cap concurrent image jobs (Fly machine has 1 GB).
+sharp.cache(false);
+sharp.concurrency(1);
+const MAX_PROCESSING = num(env.IMAGE_MAX_CONCURRENCY, 2);
+let processing = 0;
+const ALLOWED_FORMATS = ["jpeg", "png", "webp", "heif", "avif"];
 app.post(
   "/api/submit",
   allowOrigin,
-  upload.single("image"),
+  submitAbuseLimit,
+  uploadOne,
   async (req, res) => {
     try {
-      const ip = sha(req.ip || "unknown"),
-        epoch = Math.floor(Date.now() / 1000);
-      const row = db
-        .prepare("SELECT count,expires_at FROM request_limits WHERE key=?")
-        .get(ip);
-      if (row && row.expires_at > epoch && row.count >= 50)
-        return error(res, "Too many submissions", 429);
-      db.prepare(
-        "INSERT INTO request_limits(key,count,expires_at) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=CASE WHEN expires_at<? THEN 1 ELSE count+1 END,expires_at=CASE WHEN expires_at<? THEN ? ELSE expires_at END",
-      ).run(ip, epoch + 3600, epoch, epoch, epoch + 3600);
-      if (!(await turnstile(clean(req.body.turnstileToken, 4096), req.ip)))
-        return error(res, "Verification failed", 403);
+      const quotaKey = "quota:" + sha(req.ip || "unknown");
+      const q = limitRow(quotaKey);
+      if (q && q.count >= LIMITS.quotaMax) {
+        res.set("Retry-After", retryAfter(q));
+        return error(res, "Du har sendt inn mange bilder nylig. Prøv igjen i morgen.", 429);
+      }
+      if (!(await turnstile(clean(req.body.turnstileToken, 4096), req.ip))) {
+        console.warn(JSON.stringify({ event: "turnstile_failed" }));
+        return error(res, "Verifiseringen feilet. Last inn siden på nytt og prøv igjen.", 403);
+      }
       if (req.body.galleryConsent !== "true")
         return error(res, "Gallery permission required");
       if (req.body.consentVersion !== CONSENT_VERSION)
         return error(res, "Samtykketeksten er oppdatert. Last siden på nytt og prøv igjen.", 409);
       if (!req.file) return error(res, "Image required");
-      // Decode and re-encode on server to strip metadata and reject malformed input.
-      const img = sharp(req.file.buffer, {
-        limitInputPixels: 25_000_000,
-        failOn: "error",
-      });
-      const meta = await img.metadata();
-      if (!["jpeg", "png", "webp", "heif", "avif"].includes(meta.format))
-        return error(res, "Unsupported image format");
-      const bytes = await img
-        .rotate()
-        .resize({
-          width: 2200,
-          height: 2200,
-          fit: "inside",
-          withoutEnlargement: true,
-        })
-        .webp({
-          quality: 82
-        })
-        .toBuffer();
+      const product0 = clean(req.body.productHandle, 120);
+      if (product0 && !/^[a-z0-9-]+$/.test(product0))
+        return error(res, "Invalid product");
+      if (processing >= MAX_PROCESSING) {
+        res.set("Retry-After", "10");
+        return error(res, "Serveren er opptatt. Prøv igjen om litt.", 503);
+      }
+      processing++;
+      let bytes;
+      try {
+        // Decode and re-encode on the server: validates the real format (not
+        // the MIME header), caps decoded pixels, and strips EXIF/metadata.
+        const img = sharp(req.file.buffer, {
+          limitInputPixels: 25_000_000,
+          failOn: "error",
+        });
+        const meta = await img.metadata();
+        if (!ALLOWED_FORMATS.includes(meta.format))
+          return error(res, "Ugyldig bildeformat. Bruk JPG, PNG eller WebP.");
+        bytes = await img
+          .rotate()
+          .resize({
+            width: 2200,
+            height: 2200,
+            fit: "inside",
+            withoutEnlargement: true,
+          })
+          .webp({
+            quality: 82
+          })
+          .toBuffer();
+      } catch (e) {
+        console.warn(JSON.stringify({ event: "image_rejected", message: e?.message }));
+        return error(res, "Ugyldig eller skadet bilde.", 400);
+      } finally {
+        processing--;
+      }
       const id = randomUUID(),
         token = randomUUID() + randomUUID(),
         key = `photos/${id}.webp`;
@@ -422,7 +497,12 @@ app.post(
         // Record exactly the text(s) the customer saw and agreed to.
         consentRecord = marketing ? `${CONSENT_TEXT}\n---\n${MARKETING_TEXT}` : CONSENT_TEXT,
         timestamp = now();
-      await storage.put(key, bytes);
+      try {
+        await storage.put(key, bytes);
+      } catch (e) {
+        console.error(JSON.stringify({ event: "storage_put_failed", message: e?.message }));
+        return error(res, "Kunne ikke lagre bildet. Prøv igjen senere.", 502);
+      }
       try {
         db.transaction(() => {
           db.prepare(
@@ -452,9 +532,14 @@ app.post(
           );
         })();
       } catch (e) {
-        await storage.del(key);
+        try {
+          await storage.del(key);
+        } catch {
+          console.error(JSON.stringify({ event: "orphan_object", key }));
+        }
         throw e;
       }
+      hit(quotaKey, LIMITS.quotaWindow); // only successful uploads use the quota
       res.status(201).json({
         ok: true,
         id,
@@ -462,8 +547,8 @@ app.post(
         message: "Bildet er sendt til godkjenning.",
       });
     } catch (e) {
-      console.error(e);
-      error(res, "Invalid image or upload failed", 400);
+      console.error(JSON.stringify({ event: "submit_failed", message: e?.message }));
+      error(res, "Noe gikk galt under opplasting. Prøv igjen senere.", 500);
     }
   },
 );
