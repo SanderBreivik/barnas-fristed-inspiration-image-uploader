@@ -185,44 +185,47 @@ app.post("/api/admin/logout", sameOriginOnly, admin, (req, res) => {
 app.get("/api/admin/session", admin, (req, res) =>
   res.json({ ok: true, csrf: sessions.get(req.adminSession).csrf }),
 );
-const allowedHostnames = new Set([
-  "barnasfristed.no",
-  "www.barnasfristed.no",
-  "barnas-fristed.myshopify.com",
-]);
-
-const previewHostnamePattern = /^[a-z0-9-]+\.shopifypreview\.com$/;
-
-const isAllowedHostname = (hostname) =>
-  allowedHostnames.has(hostname) || previewHostnamePattern.test(hostname || "");
+// Explicit allowlist plus Shopify's preview hosts (theme editor / preview links),
+// which have random subdomains. Set ALLOW_SHOPIFY_PREVIEW=false to disable the
+// latter. Extra exact origins: EXTRA_ORIGINS="https://x.example,…".
+const PREVIEW_HOST = /^[a-z0-9-]+\.shopifypreview\.com$/;
+const PREVIEW_ORIGIN = /^https:\/\/[a-z0-9-]+\.shopifypreview\.com$/;
+const allowedOrigins = new Set(
+  [
+    "https://barnasfristed.no",
+    "https://www.barnasfristed.no",
+    "https://barnas-fristed.myshopify.com",
+    env.SHOP_ORIGIN,
+    ...String(env.EXTRA_ORIGINS || "").split(","),
+  ]
+    .map((o) => o?.trim().replace(/\/$/, ""))
+    .filter(Boolean),
+);
 
 const isAllowedOrigin = (origin) => {
-  try {
-    const url = new URL(origin);
-
-    return (
-      url.protocol === "https:" &&
-      isAllowedHostname(url.hostname) &&
-      !url.port &&
-      url.username === "" &&
-      url.password === ""
-    );
-  } catch {
-    return false;
-  }
+  if (allowedOrigins.has(origin)) return true;
+  if (env.ALLOW_SHOPIFY_PREVIEW === "false") return false;
+  return PREVIEW_ORIGIN.test(origin || "");
 };
+// Turnstile reports the hostname the widget ran on; accept the same hosts.
+const allowedHostnames = new Set([...allowedOrigins].map((o) => new URL(o).hostname));
+const isAllowedHostname = (hostname) =>
+  allowedHostnames.has(hostname) ||
+  (env.ALLOW_SHOPIFY_PREVIEW !== "false" && PREVIEW_HOST.test(hostname || ""));
 const cors = (req, res, next) => {
   const origin = req.get("origin");
 
   res.vary("Origin");
 
-  if (isAllowedOrigin(origin)) {
-    res.set("Access-Control-Allow-Origin", origin);
-  }
+  const allowed = isAllowedOrigin(origin);
+  if (allowed) res.set("Access-Control-Allow-Origin", origin);
 
   if (req.method === "OPTIONS") {
-    res.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    res.set("Access-Control-Allow-Headers", "Content-Type,Authorization");
+    if (allowed) {
+      res.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type");
+      res.set("Access-Control-Max-Age", "600");
+    }
     return res.sendStatus(204);
   }
 

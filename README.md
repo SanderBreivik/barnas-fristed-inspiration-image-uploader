@@ -110,6 +110,13 @@ Hvis en kopi må hentes fra Tigris i stedet: filene ligger i bucketen under `bac
 
 Automatiske tester (`npm test`) tar en backup, verifiserer den med integritetssjekk, gjenoppretter til en ny database og kontrollerer innholdet. Gjør i tillegg en manuell øvelse etter første deploy og deretter ca. hver 3. måned: kommandoene under «Ta og sjekke en backup».
 
+## Tillatte opprinnelser (CORS)
+
+Tillatt er `barnasfristed.no`, `www.barnasfristed.no`, `barnas-fristed.myshopify.com`, `SHOP_ORIGIN` og Shopifys forhåndsvisningsadresser (`https://<tilfeldig>.shopifypreview.com`, uten port eller underdomener), slik at temaeditor og forhåndsvisning fungerer uten oppsett. Andre jokertegn finnes ikke.
+
+- Skru av forhåndsvisning: `fly secrets set ALLOW_SHOPIFY_PREVIEW=false`.
+- Legg til en ekstra eksakt adresse: `fly secrets set EXTRA_ORIGINS="https://eksempel.no,https://annen.no"`.
+
 ## API
 
 `GET /api/config`, `GET /api/gallery?page=0`, `GET /images/:id`, `POST /api/submit`, `POST /api/remove`, `GET /admin`, `GET /api/admin/photos`, `GET /api/admin/preview/:id`, `POST /api/admin/photos/:id/:action`.
