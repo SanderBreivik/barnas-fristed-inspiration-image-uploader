@@ -1,36 +1,8 @@
-// Structured JSON logging (one line per event, easy to filter in `fly logs`).
+// Minimal structured logging: one JSON line per event, readable with `fly logs`.
 // Sensitive field names are always redacted and long strings truncated, so
 // passwords, tokens and image data can never end up in the logs.
 const SENSITIVE = /token|password|secret|authorization|cookie|credential|body|buffer/i;
 const MAX_LEN = 300;
-
-// Events that should notify the operator (via the alert sink, if configured).
-export const ALERT_EVENTS = new Set([
-  "unclean_restart",
-  "memory_high",
-  "health_check_failed",
-  "backup_failed",
-  "storage_delete_failed",
-  "storage_put_failed",
-  "orphan_object",
-  "submit_failed",
-  "db_error",
-  "uncaught_exception",
-  "unhandled_rejection",
-]);
-
-let alertSink = null;
-export const setAlertSink = (fn) => {
-  alertSink = typeof fn === "function" ? fn : null;
-};
-
-const counts = new Map();
-// Returns event counts since the last call (used for periodic metrics lines).
-export const drainCounts = () => {
-  const out = Object.fromEntries(counts);
-  counts.clear();
-  return out;
-};
 
 export function sanitize(fields = {}) {
   const out = {};
@@ -50,21 +22,11 @@ export const errFields = (e) => ({
   errorName: e?.name,
 });
 
-function emit(level, event, fields = {}) {
-  const { alert, ...rest } = fields;
-  const entry = { time: new Date().toISOString(), level, event, ...sanitize(rest) };
-  const line = JSON.stringify(entry);
+function emit(level, event, fields) {
+  const line = JSON.stringify({ time: new Date().toISOString(), level, event, ...sanitize(fields) });
   if (level === "error" || level === "fatal") console.error(line);
   else if (level === "warn") console.warn(line);
   else console.log(line);
-  counts.set(event, (counts.get(event) || 0) + 1);
-  if (alertSink && (alert === true || ALERT_EVENTS.has(event))) {
-    try {
-      alertSink(event, entry);
-    } catch {
-      /* alerting must never break the app */
-    }
-  }
 }
 
 export const log = {

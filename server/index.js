@@ -8,13 +8,7 @@ import {
   reconcile,
   retryDeletions,
 } from "./maintenance.js";
-import { log, errFields, setAlertSink, drainCounts } from "./log.js";
-import {
-  createAlerter,
-  checkUncleanShutdown,
-  markCleanShutdown,
-  memorySnapshot,
-} from "./monitor.js";
+import { log, errFields } from "./log.js";
 import multer from "multer";
 import {
   S3Client,
@@ -800,60 +794,12 @@ app.use((err, req, res, next) => {
 export { app, db };
 const live = process.env.NODE_ENV !== "test" && !process.env.NO_LISTEN;
 if (live) {
-  const alertUrl = env.ALERT_WEBHOOK_URL;
-  setAlertSink(
-    createAlerter({ url: alertUrl, throttleMs: num(env.ALERT_THROTTLE_S, 900) * 1000 }),
-  );
-  if (!alertUrl) log.warn("alerts_disabled", { message: "ALERT_WEBHOOK_URL not set" });
-  const prev = checkUncleanShutdown(dataDir);
-  log.info("startup", { node: process.version, unclean: prev.unclean });
-  if (prev.unclean)
-    log.error("unclean_restart", {
-      previousStart: prev.previousStart,
-      message: `previous run ended abruptly (possible crash or out-of-memory), started ${prev.previousStart}`,
-    });
-
-  // Memory watch: warn early (before the kernel OOM-kills the process) and log
-  // a metrics line every 5 minutes with counts of events since the last one.
-  const memLimit = Number(env.MEMORY_LIMIT_MB) || undefined;
-  let ticks = 0;
-  setInterval(() => {
-    const m = memorySnapshot(memLimit);
-    if (m.ratio > num(env.MEMORY_WARN_RATIO, 0.85))
-      log.warn("memory_high", {
-        rssMb: m.rssMb,
-        limitMb: m.limitMb,
-        message: `rss ${m.rssMb} MB of ${m.limitMb} MB`,
-      });
-    if (++ticks % 5 === 0) {
-      const counts = Object.fromEntries(
-        Object.entries(drainCounts()).map(([k, v]) => [`n_${k}`, v]),
-      );
-      log.info("metrics", {
-        rssMb: m.rssMb,
-        heapMb: m.heapMb,
-        processing,
-        adminSessions: sessions.size,
-        ...counts,
-      });
-    }
-  }, 60_000).unref();
-
-  // Active dependency check: alerts if the database or Tigris stops answering.
-  setInterval(async () => {
-    healthCache = { at: 0, result: null };
-    const r = await deepHealth();
-    if (!r.ok)
-      log.error("health_check_failed", {
-        db: r.db,
-        storage: r.storage,
-        message: `db=${r.db} storage=${r.storage}`,
-      });
-  }, 300_000).unref();
+  // Memory, CPU, restarts and OOM kills are tracked by Fly (Grafana + `fly status`).
+  log.info("startup", { node: process.version });
 
   process.on("uncaughtException", (e) => {
     log.fatal("uncaught_exception", errFields(e));
-    setTimeout(() => process.exit(1), 1500); // let the alert go out; Fly restarts us
+    setTimeout(() => process.exit(1), 500); // Fly restarts the machine
   });
   process.on("unhandledRejection", (e) => log.error("unhandled_rejection", errFields(e)));
 
@@ -862,7 +808,6 @@ if (live) {
   );
   const shutdown = (signal) => {
     log.info("shutdown", { signal });
-    markCleanShutdown(dataDir); // so the next start is not reported as a crash
     server.close(() => {
       try {
         db.close();
