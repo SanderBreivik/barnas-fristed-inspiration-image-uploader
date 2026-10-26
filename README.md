@@ -110,6 +110,25 @@ Hvis en kopi må hentes fra Tigris i stedet: filene ligger i bucketen under `bac
 
 Automatiske tester (`npm test`) tar en backup, verifiserer den med integritetssjekk, gjenoppretter til en ny database og kontrollerer innholdet. Gjør i tillegg en manuell øvelse etter første deploy og deretter ca. hver 3. måned: kommandoene under «Ta og sjekke en backup».
 
+## Kodestruktur (`server/`)
+
+| Fil | Ansvar |
+|---|---|
+| `index.js` | Setter sammen appen (middleware-rekkefølge), feilhåndtering, oppstart og avslutning |
+| `config.js` | Miljøvariabler, påkrevde innstillinger, `num()` |
+| `db.js`, `schema.sql` | SQLite og migreringer |
+| `storage.js` | Tigris/S3 (`storage.put/get/del/list`, byttes ut i tester) |
+| `origins.js` | CORS og opprinnelseskontroll |
+| `auth.js` | Admin-innlogging, økter, CSRF |
+| `turnstile.js`, `limits.js` | Bot-sjekk og rate limits |
+| `consent.js` | Samtykketekster og versjon |
+| `maintenance.js`, `jobs.js`, `restore-check.js` | Backup, gjenoppretting, opprydding, bakgrunnsjobber |
+| `log.js` | JSON-logging uten hemmeligheter |
+| `routes/public.js` | Health, config, samtykke, galleri, bilder |
+| `routes/submit.js` | Opplasting |
+| `routes/removal.js` | Kundens slettelenke |
+| `routes/admin.js` | Moderering og vedlikehold |
+
 ## Tillatte opprinnelser (CORS)
 
 Tillatt er `barnasfristed.no`, `www.barnasfristed.no`, `barnas-fristed.myshopify.com`, `SHOP_ORIGIN` og Shopifys forhåndsvisningsadresser (`https://<tilfeldig>.shopifypreview.com`, uten port eller underdomener), slik at temaeditor og forhåndsvisning fungerer uten oppsett. Andre jokertegn finnes ikke.
