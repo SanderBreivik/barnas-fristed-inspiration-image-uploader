@@ -121,3 +121,27 @@ test("admin cannot re-approve a deleted photo", async () => {
   });
   assert.equal(r.status, 409);
 });
+
+const preview = (body, origin = "https://backend.test") =>
+  fetch(`${base}/api/remove/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify(body),
+  });
+
+test("removal preview works for pending photo with valid token only", async () => {
+  const { id, token } = seed("pending");
+  const ok = await preview({ id, token });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get("x-photo-status"), "pending");
+  assert.equal(ok.headers.get("cache-control"), "no-store");
+  assert.equal((await preview({ id, token: "wrong" })).status, 403);
+  assert.equal((await preview({ id, token }, "https://evil.test")).status, 403);
+  assert.equal((await fetch(`${base}/images/${id}`)).status, 404); // still not public
+});
+
+test("removal preview is gone after removal", async () => {
+  const { id, token } = seed();
+  await remove({ id, token });
+  assert.equal((await preview({ id, token })).status, 410);
+});

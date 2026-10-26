@@ -470,6 +470,36 @@ app.post(
 app.get("/remove.html", (_req, res) =>
   res.type("html").send(readFileSync(path.join(root, "remove.html"), "utf8")),
 );
+// Preview for the owner of a removal link (works while the photo is still
+// pending/rejected, when /images/:id is not public). Token goes in the POST
+// body, never in a URL, and the response is not cacheable.
+app.post("/api/remove/preview", allowRemovalOrigin, async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const { id, token } = req.body || {};
+  if (typeof id !== "string" || typeof token !== "string" || !id || !token)
+    return error(res, "Invalid removal link", 403);
+  const row = db
+    .prepare("SELECT object_key,removal_token_hash,status FROM photos WHERE id=?")
+    .get(id);
+  const expected = Buffer.from(row?.removal_token_hash || sha("none"), "hex");
+  if (!row || !timingSafeEqual(Buffer.from(sha(token), "hex"), expected))
+    return error(res, "Invalid removal link", 403);
+  if (row.status === "deleted") return error(res, "Already removed", 410);
+  try {
+    const image = await storage.get(row.object_key);
+    res.set({
+      "Content-Type": "image/webp",
+      "X-Content-Type-Options": "nosniff",
+      "X-Photo-Status": row.status,
+    });
+    res.send(image);
+  } catch (e) {
+    console.error(
+      JSON.stringify({ event: "removal_preview_failed", photoId: id, message: e?.message }),
+    );
+    error(res, "Preview unavailable", 500);
+  }
+});
 // Customer removal. Order matters: unpublish in the DB first (so the image can
 // never be served again), then delete the object, then mark storage as deleted.
 // If object deletion fails the request returns 202 and a retry completes it.
