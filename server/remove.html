@@ -1,2 +1,197 @@
-<!doctype html><html lang="no"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Fjern bilde</title><style>body{margin:0;background:#f4f2ee;font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#252525}main{max-width:520px;margin:48px auto;padding:0 16px}.box{background:#fff;border-radius:14px;box-shadow:0 1px 4px rgba(0,0,0,.1);overflow:hidden}.pad{padding:22px 24px}h1{margin:0 0 6px;font-size:24px}p{margin:6px 0}.thumb{background:#ebe8e1;min-height:120px;display:flex;align-items:center;justify-content:center}.thumb img{display:block;max-width:100%;max-height:420px;object-fit:contain}.badge{display:inline-block;font-size:12px;font-weight:600;padding:2px 10px;border-radius:999px;background:#eceae4;color:#555}button{font:inherit;font-weight:600;margin-top:14px;padding:11px 20px;border:0;border-radius:8px;background:#a3392b;color:#fff;cursor:pointer}button:hover{background:#8a2f23}button:disabled{opacity:.5;cursor:default}button:focus-visible{outline:2px solid #252525;outline-offset:2px}#msg{font-weight:600;min-height:1.5em}[hidden]{display:none!important}</style><main><div class="box"><div class="thumb" id="thumb" hidden><img id="preview" alt="Ditt innsendte bilde"></div><div class="pad"><h1>Fjern ditt bilde</h1><p id="status" class="badge" hidden></p><p>Bildet over er det du sendte inn. Trykk på knappen for å slette det permanent. Du trenger ikke logge inn.</p><button id="remove">Fjern bildet mitt</button><p id="msg" role="status"></p></div></div></main><script>const btn=document.getElementById('remove'),msg=document.getElementById('msg'),thumb=document.getElementById('thumb'),prev=document.getElementById('preview'),badge=document.getElementById('status');const LABEL={pending:'Venter på godkjenning',approved:'Publisert i galleriet',rejected:'Ikke publisert'};const hidePreview=()=>{thumb.hidden=true;badge.hidden=true;if(prev.src)URL.revokeObjectURL(prev.src);prev.removeAttribute('src')};
-(async()=>{const u=new URL(location.href),id=u.searchParams.get('id'),token=u.searchParams.get('token');if(!id||!token){btn.disabled=true;msg.textContent='Lenken er ugyldig eller ufullstendig.';return}try{const r=await fetch('/api/remove/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,token})});if(r.ok){prev.src=URL.createObjectURL(await r.blob());thumb.hidden=false;badge.textContent=LABEL[r.headers.get('X-Photo-Status')]||'';badge.hidden=!badge.textContent}else if(r.status===410){btn.disabled=true;msg.textContent='Bildet er allerede fjernet.'}else if(r.status===403){btn.disabled=true;msg.textContent='Lenken er ugyldig. Kontakt butikken hvis du trenger hjelp.'}}catch{}})();btn.onclick=async()=>{if(!confirm('Vil du slette bildet?'))return;const u=new URL(location.href),id=u.searchParams.get('id'),token=u.searchParams.get('token');if(!id||!token){msg.textContent='Lenken er ugyldig eller ufullstendig.';return}btn.disabled=true;try{const r=await fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,token})});const d=await r.json().catch(()=>({}));if(r.status===200){msg.textContent=d.alreadyRemoved?'Bildet er allerede fjernet.':'Bildet er fjernet.';history.replaceState(null,'','/remove.html');hidePreview();btn.disabled=true}else if(r.status===202){msg.textContent='Bildet er fjernet fra galleriet. Slettingen fullføres; prøv igjen senere for å bekrefte.';btn.disabled=false}else if(r.status===403){msg.textContent='Lenken er ugyldig. Kontakt butikken hvis du trenger hjelp.'}else{msg.textContent='Noe gikk galt. Prøv igjen senere eller kontakt butikken.';btn.disabled=false}}catch{msg.textContent='Kunne ikke nå serveren. Prøv igjen senere.';btn.disabled=false}}</script></html>
+<!doctype html>
+<html lang="no">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width"
+  /><title>Fjern bilde</title
+  ><style>
+    body {
+      margin: 0;
+      background: #f4f2ee;
+      font:
+        16px/1.5 system-ui,
+        -apple-system,
+        "Segoe UI",
+        sans-serif;
+      color: #252525;
+    }
+    main {
+      max-width: 520px;
+      margin: 48px auto;
+      padding: 0 16px;
+    }
+    .box {
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+    }
+    .pad {
+      padding: 22px 24px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 24px;
+    }
+    p {
+      margin: 6px 0;
+    }
+    .thumb {
+      background: #ebe8e1;
+      min-height: 120px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .thumb img {
+      display: block;
+      max-width: 100%;
+      max-height: 420px;
+      object-fit: contain;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 2px 10px;
+      border-radius: 999px;
+      background: #eceae4;
+      color: #555;
+    }
+    button {
+      font: inherit;
+      font-weight: 600;
+      margin-top: 14px;
+      padding: 11px 20px;
+      border: 0;
+      border-radius: 8px;
+      background: #a3392b;
+      color: #fff;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #8a2f23;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    button:focus-visible {
+      outline: 2px solid #252525;
+      outline-offset: 2px;
+    }
+    #msg {
+      font-weight: 600;
+      min-height: 1.5em;
+    }
+    [hidden] {
+      display: none !important;
+    }
+  </style>
+  <main>
+    <div class="box">
+      <div class="thumb" id="thumb" hidden>
+        <img id="preview" alt="Ditt innsendte bilde" />
+      </div>
+      <div class="pad">
+        <h1>Fjern ditt bilde</h1>
+        <p id="status" class="badge" hidden></p>
+        <p>
+          Bildet over er det du sendte inn. Trykk på knappen for å slette det
+          permanent. Du trenger ikke logge inn.
+        </p>
+        <button id="remove">Fjern bildet mitt</button>
+        <p id="msg" role="status"></p>
+      </div>
+    </div>
+  </main>
+  <script>
+    const btn = document.getElementById("remove"),
+      msg = document.getElementById("msg"),
+      thumb = document.getElementById("thumb"),
+      prev = document.getElementById("preview"),
+      badge = document.getElementById("status");
+    const LABEL = {
+      pending: "Venter på godkjenning",
+      approved: "Publisert i galleriet",
+      rejected: "Ikke publisert",
+    };
+    const hidePreview = () => {
+      thumb.hidden = true;
+      badge.hidden = true;
+      if (prev.src) URL.revokeObjectURL(prev.src);
+      prev.removeAttribute("src");
+    };
+    (async () => {
+      const u = new URL(location.href),
+        id = u.searchParams.get("id"),
+        token = u.searchParams.get("token");
+      if (!id || !token) {
+        btn.disabled = true;
+        msg.textContent = "Lenken er ugyldig eller ufullstendig.";
+        return;
+      }
+      try {
+        const r = await fetch("/api/remove/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, token }),
+        });
+        if (r.ok) {
+          prev.src = URL.createObjectURL(await r.blob());
+          thumb.hidden = false;
+          badge.textContent = LABEL[r.headers.get("X-Photo-Status")] || "";
+          badge.hidden = !badge.textContent;
+        } else if (r.status === 410) {
+          btn.disabled = true;
+          msg.textContent = "Bildet er allerede fjernet.";
+        } else if (r.status === 403) {
+          btn.disabled = true;
+          msg.textContent =
+            "Lenken er ugyldig. Kontakt butikken hvis du trenger hjelp.";
+        }
+      } catch {}
+    })();
+    btn.onclick = async () => {
+      if (!confirm("Vil du slette bildet?")) return;
+      const u = new URL(location.href),
+        id = u.searchParams.get("id"),
+        token = u.searchParams.get("token");
+      if (!id || !token) {
+        msg.textContent = "Lenken er ugyldig eller ufullstendig.";
+        return;
+      }
+      btn.disabled = true;
+      try {
+        const r = await fetch("/api/remove", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, token }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.status === 200) {
+          msg.textContent = d.alreadyRemoved
+            ? "Bildet er allerede fjernet."
+            : "Bildet er fjernet.";
+          history.replaceState(null, "", "/remove.html");
+          hidePreview();
+          btn.disabled = true;
+        } else if (r.status === 202) {
+          msg.textContent =
+            "Bildet er fjernet fra galleriet. Slettingen fullføres; prøv igjen senere for å bekrefte.";
+          btn.disabled = false;
+        } else if (r.status === 403) {
+          msg.textContent =
+            "Lenken er ugyldig. Kontakt butikken hvis du trenger hjelp.";
+        } else {
+          msg.textContent =
+            "Noe gikk galt. Prøv igjen senere eller kontakt butikken.";
+          btn.disabled = false;
+        }
+      } catch {
+        msg.textContent = "Kunne ikke nå serveren. Prøv igjen senere.";
+        btn.disabled = false;
+      }
+    };
+  </script>
+</html>
