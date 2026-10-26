@@ -59,7 +59,7 @@ submitRouter.post("/api/submit", allowOrigin, submitAbuseLimit, uploadOne, async
       return error(res, "Serveren er opptatt. Prøv igjen om litt.", 503);
     }
     processing++;
-    let bytes;
+    let bytes, dims;
     try {
       // Decode and re-encode on the server: validates the real format (not
       // the MIME header), caps decoded pixels, and strips EXIF/metadata.
@@ -67,11 +67,13 @@ submitRouter.post("/api/submit", allowOrigin, submitAbuseLimit, uploadOne, async
       const meta = await img.metadata();
       if (!ALLOWED_FORMATS.includes(meta.format))
         return error(res, "Ugyldig bildeformat. Bruk JPG, PNG eller WebP.");
-      bytes = await img
+      const out = await img
         .rotate()
         .resize({ width: 2200, height: 2200, fit: "inside", withoutEnlargement: true })
         .webp({ quality: 82 })
-        .toBuffer();
+        .toBuffer({ resolveWithObject: true });
+      bytes = out.data;
+      dims = out.info;
     } catch (e) {
       log.warn("image_rejected", errFields(e));
       return error(res, "Ugyldig eller skadet bilde.", 400);
@@ -95,7 +97,7 @@ submitRouter.post("/api/submit", allowOrigin, submitAbuseLimit, uploadOne, async
     try {
       db.transaction(() => {
         db.prepare(
-          "INSERT INTO photos(id,object_key,display_name,description,product_handle,status,gallery_consent,marketing_consent,consent_version,consent_text,submitted_at,removal_token_hash) VALUES(?,?,?,?,?,'pending',1,?,?,?,?,?)",
+          "INSERT INTO photos(id,object_key,display_name,description,product_handle,status,gallery_consent,marketing_consent,consent_version,consent_text,submitted_at,removal_token_hash,width,height) VALUES(?,?,?,?,?,'pending',1,?,?,?,?,?,?,?)",
         ).run(
           id,
           key,
@@ -107,6 +109,8 @@ submitRouter.post("/api/submit", allowOrigin, submitAbuseLimit, uploadOne, async
           consentRecord,
           timestamp,
           sha(token),
+          dims.width,
+          dims.height,
         );
         db.prepare(
           "INSERT INTO consent_events(id,photo_id,action,version,consent_text,marketing_consent,created_at) VALUES(?,?,?,?,?,?,?)",

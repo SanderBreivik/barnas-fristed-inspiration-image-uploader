@@ -9,6 +9,7 @@ import { now, error } from "../util.js";
 import { log, errFields } from "../log.js";
 import { admin } from "../auth.js";
 import { sameOriginOnly } from "../origins.js";
+import { removeThumb } from "../images.js";
 import { backupDatabase, enforceRetention, reconcile, retryDeletions } from "../maintenance.js";
 import { maint, retentionOpts, logRetention } from "../jobs.js";
 
@@ -53,6 +54,7 @@ adminRouter.post("/api/admin/photos/:id/:action", admin, async (req, res) => {
   db.prepare(
     "UPDATE photos SET status=?,approved_at=CASE WHEN ?='approved' THEN ? ELSE approved_at END,deleted_at=CASE WHEN ?='deleted' THEN ? ELSE deleted_at END WHERE id=?",
   ).run(status, status, now(), status, now(), id);
+  if (status !== "approved") removeThumb(id);
   if (action === "delete") {
     try {
       await storage.del(row.object_key);

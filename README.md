@@ -110,6 +110,13 @@ Hvis en kopi må hentes fra Tigris i stedet: filene ligger i bucketen under `bac
 
 Automatiske tester (`npm test`) tar en backup, verifiserer den med integritetssjekk, gjenoppretter til en ny database og kontrollerer innholdet. Gjør i tillegg en manuell øvelse etter første deploy og deretter ca. hver 3. måned: kommandoene under «Ta og sjekke en backup».
 
+## Bildelevering
+
+- Galleriruten viser en miniatyr (`/images/:id/thumb`, 720 px bred, WebP) i stedet for originalen (opptil 2200 px). Lightboxen laster originalen (`/images/:id`). Miniatyrer lages ved første forespørsel, lagres i `/data/thumbs` og kan alltid gjenskapes; de tas ikke med i backup. Settes opp med `THUMB_WIDTH` og `THUMB_MAX_CONCURRENCY` (standard 720 og 2).
+- Galleri-API-et returnerer `width`/`height`, slik at siden reserverer plass og ikke hopper. Eldre bilder får målene første gang miniatyren lages.
+- Svarene har `ETag` og `Cache-Control: public, max-age=60`; nettleseren får `304` uten at Tigris kontaktes. Cachetiden er bevisst kort: et slettet bilde forsvinner fra nettleserbufferen på ca. ett minutt.
+- Miniatyrer av bilder som ikke lenger er godkjent slettes ved avvisning/sletting og ryddes hvert time.
+
 ## Kodestruktur (`server/`)
 
 | Fil | Ansvar |

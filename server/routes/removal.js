@@ -10,6 +10,7 @@ import { sha, now, error } from "../util.js";
 import { log, errFields } from "../log.js";
 import { CONSENT_VERSION } from "../consent.js";
 import { allowRemovalOrigin } from "../origins.js";
+import { removeThumb } from "../images.js";
 
 export const removalRouter = Router();
 
@@ -71,6 +72,7 @@ removalRouter.post("/api/remove", allowRemovalOrigin, async (req, res) => {
   }
   try {
     await storage.del(row.object_key);
+    removeThumb(id);
     db.prepare("UPDATE photos SET storage_deleted_at=? WHERE id=?").run(now(), id);
   } catch (e) {
     log.error("storage_delete_failed", { photoId: id, source: "customer", ...errFields(e) });

@@ -9,7 +9,12 @@ db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 db.exec(readFileSync(path.join(root, "schema.sql"), "utf8"));
 
-// Additive migration: tracks whether the stored object is confirmed deleted.
-// Back up photos.sqlite before first deploy (see README).
-if (!db.prepare("PRAGMA table_info(photos)").all().some((c) => c.name === "storage_deleted_at"))
+// Additive migrations. Back up photos.sqlite before first deploy (see README).
+const columns = db.prepare("PRAGMA table_info(photos)").all().map((c) => c.name);
+// Tracks whether the stored object is confirmed deleted.
+if (!columns.includes("storage_deleted_at"))
   db.exec("ALTER TABLE photos ADD COLUMN storage_deleted_at TEXT");
+// Pixel size of the stored image (lets the gallery reserve space; old rows are
+// filled in the first time a thumbnail is generated).
+if (!columns.includes("width")) db.exec("ALTER TABLE photos ADD COLUMN width INTEGER");
+if (!columns.includes("height")) db.exec("ALTER TABLE photos ADD COLUMN height INTEGER");

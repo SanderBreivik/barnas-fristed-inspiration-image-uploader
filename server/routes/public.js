@@ -6,6 +6,7 @@ import { storage } from "../storage.js";
 import { error } from "../util.js";
 import { log, errFields } from "../log.js";
 import { CONSENT_TEXT, MARKETING_TEXT, CONSENT_VERSION } from "../consent.js";
+import { getThumb } from "../images.js";
 
 export const publicRouter = Router();
 
@@ -51,14 +52,30 @@ publicRouter.get("/api/gallery", (req, res) => {
   const page = Math.max(0, Math.min(100, Number.parseInt(req.query.page, 10) || 0));
   const photos = db
     .prepare(
-      "SELECT id,display_name,description,product_handle,approved_at FROM photos WHERE status='approved' ORDER BY approved_at DESC LIMIT 24 OFFSET ?",
+      "SELECT id,display_name,description,product_handle,approved_at,width,height FROM photos WHERE status='approved' ORDER BY approved_at DESC LIMIT 24 OFFSET ?",
     )
     .all(page * 24);
   res.json({
-    photos: photos.map((p) => ({ ...p, imageUrl: `${env.PUBLIC_ORIGIN}/images/${p.id}` })),
+    photos: photos.map((p) => ({
+      ...p,
+      imageUrl: `${env.PUBLIC_ORIGIN}/images/${p.id}`,
+      thumbUrl: `${env.PUBLIC_ORIGIN}/images/${p.id}/thumb`,
+    })),
     nextPage: photos.length === 24 ? page + 1 : null,
   });
 });
+
+// Image content for an id never changes, so the ETag is derived from the id and
+// answered before touching storage. max-age stays short on purpose: a removed
+// photo must disappear from browser caches within about a minute.
+const imageHeaders = (res, id, kind) =>
+  res.set({
+    "Content-Type": "image/webp",
+    "Cache-Control": "public, max-age=60",
+    ETag: `"${id}-${kind}"`,
+    "Cross-Origin-Resource-Policy": "cross-origin",
+    "X-Content-Type-Options": "nosniff",
+  });
 
 publicRouter.get("/images/:id", async (req, res) => {
   try {
@@ -66,16 +83,26 @@ publicRouter.get("/images/:id", async (req, res) => {
       .prepare("SELECT object_key FROM photos WHERE id=? AND status='approved'")
       .get(req.params.id);
     if (!row) return error(res, "Not found", 404);
-    const image = await storage.get(row.object_key);
-    res.set({
-      "Content-Type": "image/webp",
-      "Cache-Control": "public, max-age=60",
-      "Cross-Origin-Resource-Policy": "cross-origin",
-      "X-Content-Type-Options": "nosniff",
-    });
-    res.send(image);
+    imageHeaders(res, req.params.id, "full");
+    if (req.fresh) return res.status(304).end();
+    res.send(await storage.get(row.object_key));
   } catch (e) {
     log.error("image_serve_failed", errFields(e));
+    error(res, "Image unavailable", 500);
+  }
+});
+
+publicRouter.get("/images/:id/thumb", async (req, res) => {
+  try {
+    const row = db
+      .prepare("SELECT id,object_key FROM photos WHERE id=? AND status='approved'")
+      .get(req.params.id);
+    if (!row) return error(res, "Not found", 404);
+    imageHeaders(res, row.id, "thumb");
+    if (req.fresh) return res.status(304).end();
+    res.send(await getThumb(row));
+  } catch (e) {
+    log.error("thumb_serve_failed", errFields(e));
     error(res, "Image unavailable", 500);
   }
 });

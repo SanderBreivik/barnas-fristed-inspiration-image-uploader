@@ -5,6 +5,7 @@ import { db } from "./db.js";
 import { storage } from "./storage.js";
 import { CONSENT_VERSION } from "./consent.js";
 import { log, errFields } from "./log.js";
+import { sweepThumbs } from "./images.js";
 
 export const maint = () => ({ db, storage, dataDir, keep: num(env.BACKUP_KEEP, 14) });
 
@@ -28,6 +29,9 @@ export const logRetention = (r) =>
 // Daily automatic backup. Checks hourly so a restart never skips or duplicates one.
 // Retention is opt-in: nothing is deleted automatically until RETENTION_ENABLED=true.
 export function startBackgroundJobs() {
+  // Drop cached thumbnails of photos that are no longer approved (hourly).
+  sweepThumbs();
+  setInterval(sweepThumbs, 3600_000).unref();
   if (env.BACKUP_ENABLED === "false") return;
   const tick = async () => {
     try {
