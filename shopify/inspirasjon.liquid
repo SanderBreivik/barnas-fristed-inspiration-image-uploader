@@ -1,37 +1,961 @@
 {% comment %}Paste into a Shopify Custom Liquid section. Set worker endpoint below. {% endcomment %}
 {% assign inspiration_api = 'https://barnas-fristed-inspirasjon.fly.dev' %}
 <section id="inspiration-app" data-api="{{ inspiration_api }}">
- <div class="insp-header"><div><h1>La deg inspirere</h1><p>Se bildene fra fellesskapet og del din egen inspirasjon.</p></div><button id="insp-open" type="button">Del ditt bilde</button></div>
- <div id="insp-grid" class="insp-grid" aria-live="polite"></div><button id="insp-more" hidden type="button">Vis flere bilder</button>
- <dialog id="insp-dialog"><form id="insp-form"><button class="insp-close" type="button" id="insp-close" aria-label="Lukk">×</button><h2>Del ditt bilde</h2><p>Bildet blir gjennomgått før det publiseres.</p><label>Bilde (JPG, PNG eller WebP)<input type="file" name="image" accept="image/jpeg,image/png,image/webp" required></label><label>Navn (valgfritt)<input name="displayName" maxlength="80"></label><label>Beskrivelse (valgfritt)<textarea name="description" maxlength="500"></textarea></label><label>Produkt (valgfritt)<select name="productHandle" id="insp-products"><option value="">Ingen produkt valgt</option></select></label><label class="insp-check"><input type="checkbox" name="galleryConsent" required> <span id="insp-gallery-text">Laster …</span></label><label class="insp-check"><input type="checkbox" name="marketingConsent"> <span id="insp-marketing-text"></span></label><p class="insp-privacy">Vi lagrer bildet privat til det er godkjent. Se <a href="/policies/privacy-policy" target="_blank" rel="noopener">personvernerklæringen</a> for hvordan opplysninger behandles og hvor lenge de lagres.</p><div id="insp-turnstile"></div><button type="submit" id="insp-submit">Send til godkjenning</button><p id="insp-feedback" role="status"></p></form></dialog>
- <dialog id="insp-lightbox" aria-label="Forstørret bilde"><button type="button" class="insp-lb-close" id="insp-lb-close" aria-label="Lukk">×</button><button type="button" class="insp-lb-nav insp-lb-prev" id="insp-lb-prev" aria-label="Forrige bilde">‹</button><button type="button" class="insp-lb-nav insp-lb-next" id="insp-lb-next" aria-label="Neste bilde">›</button><div class="insp-lb-stage"><img id="insp-lb-img" alt=""></div><div class="insp-lb-cap" id="insp-lb-cap" aria-live="polite"></div></dialog>
+  <div class="insp-header">
+    <div>
+      <h1>La deg inspirere</h1>
+      <p>Se bildene fra fellesskapet og del din egen inspirasjon.</p>
+    </div>
+    <button id="insp-open" type="button">Del ditt bilde</button>
+  </div>
+  <div id="insp-grid" class="insp-grid" aria-live="polite"></div>
+  <button id="insp-more" hidden type="button">Vis flere bilder</button>
+  <dialog id="insp-dialog">
+    <form id="insp-form">
+      <button class="insp-close" type="button" id="insp-close" aria-label="Lukk">×</button>
+      <h2>Del ditt bilde</h2>
+      <p>Bildet blir gjennomgått før det publiseres.</p>
+      <label
+        >Bilde (JPG, PNG eller WebP)<input
+          type="file"
+          name="image"
+          accept="image/jpeg,image/png,image/webp"
+          required></label
+      ><label>Navn (valgfritt)<input name="displayName" maxlength="80"></label
+      ><label>Beskrivelse (valgfritt)<textarea name="description" maxlength="500"></textarea></label
+      ><label
+        >Produkt (valgfritt)<select name="productHandle" id="insp-products">
+          <option value="">Ingen produkt valgt</option>
+        </select></label
+      ><label class="insp-check"
+        ><input type="checkbox" name="galleryConsent" required> <span id="insp-gallery-text">Laster …</span></label
+      ><label class="insp-check"
+        ><input type="checkbox" name="marketingConsent"> <span id="insp-marketing-text"></span
+      ></label>
+      <p class="insp-privacy">
+        Vi lagrer bildet privat til det er godkjent. Se
+        <a href="/policies/privacy-policy" target="_blank" rel="noopener">personvernerklæringen</a> for hvordan
+        opplysninger behandles og hvor lenge de lagres.
+      </p>
+      <div id="insp-turnstile"></div>
+      <button type="submit" id="insp-submit">Send til godkjenning</button>
+      <p id="insp-feedback" role="status"></p>
+    </form>
+  </dialog>
+  <dialog id="insp-lightbox" aria-label="Forstørret bilde">
+    <button type="button" class="insp-lb-close" id="insp-lb-close" aria-label="Lukk">×</button
+    ><button type="button" class="insp-lb-nav insp-lb-prev" id="insp-lb-prev" aria-label="Forrige bilde">‹</button
+    ><button type="button" class="insp-lb-nav insp-lb-next" id="insp-lb-next" aria-label="Neste bilde">›</button>
+    <div class="insp-lb-stage"><img id="insp-lb-img" alt=""></div>
+    <div class="insp-lb-cap" id="insp-lb-cap" aria-live="polite"></div>
+  </dialog>
 </section>
 <style>
-#inspiration-app{max-width:1350px;margin:auto;padding:32px 16px;font-family:inherit} .insp-header{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:30px;flex-wrap:wrap}.insp-header h1{margin:0;font-size:clamp(30px,4vw,52px)}.insp-header p{margin:8px 0;color:#666}.insp-header button,#insp-submit,#insp-more{background:#252525;color:white;border:0;padding:12px 22px;border-radius:5px;cursor:pointer}.insp-grid{columns:4 230px;column-gap:16px}.insp-card{break-inside:avoid;margin:0 0 16px;overflow:hidden;border-radius:10px;background:#f5f5f5}.insp-card img{display:block;width:100%;height:auto}.insp-card{box-shadow:0 1px 3px rgba(0,0,0,.08);transition:box-shadow .2s,transform .2s}.insp-card:hover{box-shadow:0 6px 18px rgba(0,0,0,.14);transform:translateY(-2px)}.insp-card figcaption{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:12px 14px 14px;font-size:14px;line-height:1.4;background:#fff}.insp-by{color:#777;font-size:12px}.insp-card figcaption:empty{display:none}.insp-product{display:flex;align-items:center;gap:10px;box-sizing:border-box;width:100%;margin-top:4px;padding:6px 10px 6px 6px;border:1px solid #e3e3e3;border-radius:8px;color:#252525;font-size:13px;line-height:1.3;text-decoration:none;background:#fafafa}.insp-card .insp-product img.insp-pthumb,.insp-product .insp-pthumb{display:block;flex:0 0 44px;width:44px;height:44px;border-radius:6px;object-fit:cover}.insp-product:hover,.insp-product:focus-visible{border-color:#252525;background:#f0f0f0}.insp-header button,#insp-submit,#insp-more{font:inherit;font-size:15px;white-space:nowrap}.insp-header button:hover,#insp-submit:hover,#insp-more:hover{background:#000}.insp-header button:focus-visible,#insp-submit:focus-visible,#insp-more:focus-visible,.insp-close:focus-visible{outline:2px solid #252525;outline-offset:2px}.insp-header{border-bottom:1px solid #eee;padding-bottom:24px}.insp-feedback-link{word-break:break-all}#insp-more{display:block;margin:22px auto}#insp-more[hidden]{display:none}#insp-dialog{border:0;border-radius:12px;max-width:530px;width:calc(100% - 30px);max-height:90vh;overflow:auto;padding:30px}#insp-dialog::backdrop{background:rgba(0,0,0,.6)}#insp-form{display:grid;gap:16px}#insp-form>label{display:grid;gap:5px}#insp-form input:not([type=checkbox]),#insp-form select,#insp-form textarea{width:100%;padding:10px;border:1px solid #aaa;border-radius:4px}#insp-form .insp-check{display:flex;align-items:flex-start;gap:10px;font-size:14px}#insp-form .insp-check input{margin-top:4px}.insp-close{position:absolute;right:14px;top:10px;border:0;background:none;font-size:30px;cursor:pointer}#insp-form [hidden]{display:none!important}#insp-feedback input{width:100%;padding:10px;border:1px solid #aaa;border-radius:4px;margin:10px 0;font-size:13px}#insp-feedback button{padding:8px 16px;border:0;border-radius:5px;background:#252525;color:#fff;cursor:pointer}#insp-feedback a{display:inline-block;margin-top:6px}#insp-feedback{margin:0}.insp-zoom{display:block;width:100%;padding:0;border:0;background:none;cursor:zoom-in}.insp-zoom:focus-visible{outline:3px solid #252525;outline-offset:-3px}#insp-lightbox{border:0;border-radius:14px;padding:0;width:min(96vw,1000px);max-height:96vh;overflow:hidden;background:#fff;position:fixed}#insp-lightbox::backdrop{background:rgba(0,0,0,.85)}#insp-lightbox[open]{display:flex;flex-direction:column}.insp-lb-stage{background:#111;display:flex;align-items:center;justify-content:center;min-height:200px;touch-action:pan-y}.insp-lb-stage img{display:block;max-width:100%;max-height:70vh;object-fit:contain}.insp-lb-cap{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:14px 18px 18px;max-height:22vh;overflow:auto;font-size:15px;line-height:1.45}.insp-lb-cap:empty{display:none}.insp-lb-close,.insp-lb-nav{position:absolute;z-index:2;border:0;background:rgba(0,0,0,.55);color:#fff;cursor:pointer;line-height:1;border-radius:50%;width:44px;height:44px;font-size:26px;display:flex;align-items:center;justify-content:center}.insp-lb-close{top:10px;right:10px}.insp-lb-nav{top:calc(35vh - 22px)}.insp-lb-prev{left:10px}.insp-lb-next{right:10px}.insp-lb-close:hover,.insp-lb-nav:hover{background:#000}.insp-lb-close:focus-visible,.insp-lb-nav:focus-visible{outline:3px solid #fff;outline-offset:2px}.insp-lb-nav[hidden]{display:none}.insp-skel{pointer-events:none;box-shadow:none;background:linear-gradient(90deg,#f0f0f0 25%,#e6e6e6 50%,#f0f0f0 75%);background-size:200% 100%;animation:insp-shimmer 1.4s ease-in-out infinite}.insp-skel:hover{transform:none;box-shadow:none}@keyframes insp-shimmer{from{background-position:200% 0}to{background-position:-200% 0}}@media(prefers-reduced-motion:reduce){.insp-skel{animation:none}}.insp-empty{column-span:all;display:flex;flex-direction:column;align-items:center;gap:8px;padding:56px 16px;text-align:center;border:1px dashed #ccc;border-radius:10px;background:#fafafa}.insp-empty strong{font-size:20px}.insp-empty p{margin:0 0 8px;color:#666}.insp-empty button{background:#252525;color:#fff;border:0;padding:12px 22px;border-radius:5px;cursor:pointer;font:inherit;font-size:15px}.insp-empty button:hover{background:#000}.insp-empty button:focus-visible{outline:2px solid #252525;outline-offset:2px}#insp-open,.insp-empty button{display:inline-flex;align-items:center;gap:10px;padding:14px 26px;border-radius:999px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.18);transition:transform .15s,box-shadow .15s,background .15s}#insp-open::before,.insp-empty button::before{content:"";flex:0 0 20px;width:20px;height:20px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z'/%3E%3Ccircle cx='12' cy='13' r='4'/%3E%3C/svg%3E") center/contain no-repeat}#insp-open:hover,.insp-empty button:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,.25)}#insp-open:active,.insp-empty button:active{transform:none;box-shadow:0 2px 6px rgba(0,0,0,.2)}#insp-dialog{border-radius:18px;padding:32px 30px;box-shadow:0 20px 60px rgba(0,0,0,.3)}#insp-dialog[open]{animation:insp-pop .2s ease-out}@keyframes insp-pop{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}#insp-dialog::backdrop{backdrop-filter:blur(3px)}#insp-form h2{margin:0;font-size:26px;line-height:1.2;padding-right:44px}#insp-form h2+p{margin:-8px 0 4px;color:#666;font-size:15px}#insp-form>label{font-size:14px;font-weight:600;color:#252525}#insp-form>label input:not([type=checkbox]),#insp-form>label select,#insp-form>label textarea{font:inherit;font-size:15px;font-weight:400;border:1px solid #d6d6d6;border-radius:8px;background:#fff;transition:border-color .15s,box-shadow .15s}#insp-form>label input:not([type=checkbox]):focus,#insp-form>label select:focus,#insp-form>label textarea:focus{outline:0;border-color:#252525;box-shadow:0 0 0 3px rgba(37,37,37,.12)}#insp-form>label input:not([type=checkbox])[type=file]{padding:22px 14px;border:2px dashed #cfcfcf;border-radius:12px;background:#fafafa;cursor:pointer;font-size:14px;color:#666}#insp-form>label input:not([type=checkbox])[type=file]:hover{border-color:#252525}#insp-form input[type=file]::file-selector-button{margin-right:12px;border:0;border-radius:999px;background:#252525;color:#fff;padding:8px 16px;font:inherit;font-size:14px;font-weight:600;cursor:pointer}#insp-form .insp-check{background:#f7f7f7;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.5;font-weight:400;color:#444}#insp-form .insp-check input{accent-color:#252525;width:18px;height:18px;flex:0 0 18px;margin-top:2px}.insp-privacy{margin:0;font-size:13px;line-height:1.5;color:#777}#insp-submit{width:100%;padding:15px 22px;border-radius:999px;font-size:16px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.18);transition:transform .15s,box-shadow .15s,background .15s}#insp-submit:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,.25)}#insp-submit:disabled{opacity:.6;cursor:progress;transform:none}.insp-close{display:flex;align-items:center;justify-content:center;width:36px;height:36px;right:16px;top:16px;border-radius:50%;background:#f1f1f1;color:#252525;font-size:22px;line-height:1}.insp-close:hover{background:#e2e2e2}@media(max-width:550px){.insp-lb-nav{width:38px;height:38px}#insp-lightbox{width:100vw;max-height:100vh;border-radius:0}.insp-lb-stage img{max-height:62vh}} @media(max-width:550px){.insp-grid{columns:2 140px;column-gap:10px}.insp-card{margin-bottom:10px}}
+  #inspiration-app {
+    max-width: 1350px;
+    margin: auto;
+    padding: 32px 16px;
+    font-family: inherit;
+  }
+  .insp-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+  }
+  .insp-header h1 {
+    margin: 0;
+    font-size: clamp(30px, 4vw, 52px);
+  }
+  .insp-header p {
+    margin: 8px 0;
+    color: #666;
+  }
+  .insp-header button,
+  #insp-submit,
+  #insp-more {
+    background: #252525;
+    color: white;
+    border: 0;
+    padding: 12px 22px;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .insp-grid {
+    columns: 4 230px;
+    column-gap: 16px;
+  }
+  .insp-card {
+    break-inside: avoid;
+    margin: 0 0 16px;
+    overflow: hidden;
+    border-radius: 10px;
+    background: #f5f5f5;
+  }
+  .insp-card img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .insp-card {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    transition:
+      box-shadow 0.2s,
+      transform 0.2s;
+  }
+  .insp-card:hover {
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+    transform: translateY(-2px);
+  }
+  .insp-card figcaption {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 12px 14px 14px;
+    font-size: 14px;
+    line-height: 1.4;
+    background: #fff;
+  }
+  .insp-by {
+    color: #777;
+    font-size: 12px;
+  }
+  .insp-card figcaption:empty {
+    display: none;
+  }
+  .insp-product {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-sizing: border-box;
+    width: 100%;
+    margin-top: 4px;
+    padding: 6px 10px 6px 6px;
+    border: 1px solid #e3e3e3;
+    border-radius: 8px;
+    color: #252525;
+    font-size: 13px;
+    line-height: 1.3;
+    text-decoration: none;
+    background: #fafafa;
+  }
+  .insp-card .insp-product img.insp-pthumb,
+  .insp-product .insp-pthumb {
+    display: block;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    border-radius: 6px;
+    object-fit: cover;
+  }
+  .insp-product:hover,
+  .insp-product:focus-visible {
+    border-color: #252525;
+    background: #f0f0f0;
+  }
+  .insp-header button,
+  #insp-submit,
+  #insp-more {
+    font: inherit;
+    font-size: 15px;
+    white-space: nowrap;
+  }
+  .insp-header button:hover,
+  #insp-submit:hover,
+  #insp-more:hover {
+    background: #000;
+  }
+  .insp-header button:focus-visible,
+  #insp-submit:focus-visible,
+  #insp-more:focus-visible,
+  .insp-close:focus-visible {
+    outline: 2px solid #252525;
+    outline-offset: 2px;
+  }
+  .insp-header {
+    border-bottom: 1px solid #eee;
+    padding-bottom: 24px;
+  }
+  .insp-feedback-link {
+    word-break: break-all;
+  }
+  #insp-more {
+    display: block;
+    margin: 22px auto;
+  }
+  #insp-more[hidden] {
+    display: none;
+  }
+  #insp-dialog {
+    border: 0;
+    border-radius: 12px;
+    max-width: 530px;
+    width: calc(100% - 30px);
+    max-height: 90vh;
+    overflow: auto;
+    padding: 30px;
+  }
+  #insp-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.6);
+  }
+  #insp-form {
+    display: grid;
+    gap: 16px;
+  }
+  #insp-form > label {
+    display: grid;
+    gap: 5px;
+  }
+  #insp-form input:not([type='checkbox']),
+  #insp-form select,
+  #insp-form textarea {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #aaa;
+    border-radius: 4px;
+  }
+  #insp-form .insp-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 14px;
+  }
+  #insp-form .insp-check input {
+    margin-top: 4px;
+  }
+  .insp-close {
+    position: absolute;
+    right: 14px;
+    top: 10px;
+    border: 0;
+    background: none;
+    font-size: 30px;
+    cursor: pointer;
+  }
+  #insp-form [hidden] {
+    display: none !important;
+  }
+  #insp-feedback input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #aaa;
+    border-radius: 4px;
+    margin: 10px 0;
+    font-size: 13px;
+  }
+  #insp-feedback button {
+    padding: 8px 16px;
+    border: 0;
+    border-radius: 5px;
+    background: #252525;
+    color: #fff;
+    cursor: pointer;
+  }
+  #insp-feedback a {
+    display: inline-block;
+    margin-top: 6px;
+  }
+  #insp-feedback {
+    margin: 0;
+  }
+  .insp-zoom {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: zoom-in;
+  }
+  .insp-zoom:focus-visible {
+    outline: 3px solid #252525;
+    outline-offset: -3px;
+  }
+  #insp-lightbox {
+    border: 0;
+    border-radius: 14px;
+    padding: 0;
+    width: min(96vw, 1000px);
+    max-height: 96vh;
+    overflow: hidden;
+    background: #fff;
+    position: fixed;
+  }
+  #insp-lightbox::backdrop {
+    background: rgba(0, 0, 0, 0.85);
+  }
+  #insp-lightbox[open] {
+    display: flex;
+    flex-direction: column;
+  }
+  .insp-lb-stage {
+    background: #111;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+    touch-action: pan-y;
+  }
+  .insp-lb-stage img {
+    display: block;
+    max-width: 100%;
+    max-height: 70vh;
+    object-fit: contain;
+  }
+  .insp-lb-cap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 14px 18px 18px;
+    max-height: 22vh;
+    overflow: auto;
+    font-size: 15px;
+    line-height: 1.45;
+  }
+  .insp-lb-cap:empty {
+    display: none;
+  }
+  .insp-lb-close,
+  .insp-lb-nav {
+    position: absolute;
+    z-index: 2;
+    border: 0;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    cursor: pointer;
+    line-height: 1;
+    border-radius: 50%;
+    width: 44px;
+    height: 44px;
+    font-size: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .insp-lb-close {
+    top: 10px;
+    right: 10px;
+  }
+  .insp-lb-nav {
+    top: calc(35vh - 22px);
+  }
+  .insp-lb-prev {
+    left: 10px;
+  }
+  .insp-lb-next {
+    right: 10px;
+  }
+  .insp-lb-close:hover,
+  .insp-lb-nav:hover {
+    background: #000;
+  }
+  .insp-lb-close:focus-visible,
+  .insp-lb-nav:focus-visible {
+    outline: 3px solid #fff;
+    outline-offset: 2px;
+  }
+  .insp-lb-nav[hidden] {
+    display: none;
+  }
+  .insp-skel {
+    pointer-events: none;
+    box-shadow: none;
+    background: linear-gradient(90deg, #f0f0f0 25%, #e6e6e6 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: insp-shimmer 1.4s ease-in-out infinite;
+  }
+  .insp-skel:hover {
+    transform: none;
+    box-shadow: none;
+  }
+  @keyframes insp-shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .insp-skel {
+      animation: none;
+    }
+  }
+  .insp-empty {
+    column-span: all;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 56px 16px;
+    text-align: center;
+    border: 1px dashed #ccc;
+    border-radius: 10px;
+    background: #fafafa;
+  }
+  .insp-empty strong {
+    font-size: 20px;
+  }
+  .insp-empty p {
+    margin: 0 0 8px;
+    color: #666;
+  }
+  .insp-empty button {
+    background: #252525;
+    color: #fff;
+    border: 0;
+    padding: 12px 22px;
+    border-radius: 5px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 15px;
+  }
+  .insp-empty button:hover {
+    background: #000;
+  }
+  .insp-empty button:focus-visible {
+    outline: 2px solid #252525;
+    outline-offset: 2px;
+  }
+  #insp-open,
+  .insp-empty button {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 26px;
+    border-radius: 999px;
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+    transition:
+      transform 0.15s,
+      box-shadow 0.15s,
+      background 0.15s;
+  }
+  #insp-open::before,
+  .insp-empty button::before {
+    content: '';
+    flex: 0 0 20px;
+    width: 20px;
+    height: 20px;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z'/%3E%3Ccircle cx='12' cy='13' r='4'/%3E%3C/svg%3E")
+      center/contain no-repeat;
+  }
+  #insp-open:hover,
+  .insp-empty button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+  }
+  #insp-open:active,
+  .insp-empty button:active {
+    transform: none;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  }
+  #insp-dialog {
+    border-radius: 18px;
+    padding: 32px 30px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  }
+  #insp-dialog[open] {
+    animation: insp-pop 0.2s ease-out;
+  }
+  @keyframes insp-pop {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  #insp-dialog::backdrop {
+    backdrop-filter: blur(3px);
+  }
+  #insp-form h2 {
+    margin: 0;
+    font-size: 26px;
+    line-height: 1.2;
+    padding-right: 44px;
+  }
+  #insp-form h2 + p {
+    margin: -8px 0 4px;
+    color: #666;
+    font-size: 15px;
+  }
+  #insp-form > label {
+    font-size: 14px;
+    font-weight: 600;
+    color: #252525;
+  }
+  #insp-form > label input:not([type='checkbox']),
+  #insp-form > label select,
+  #insp-form > label textarea {
+    font: inherit;
+    font-size: 15px;
+    font-weight: 400;
+    border: 1px solid #d6d6d6;
+    border-radius: 8px;
+    background: #fff;
+    transition:
+      border-color 0.15s,
+      box-shadow 0.15s;
+  }
+  #insp-form > label input:not([type='checkbox']):focus,
+  #insp-form > label select:focus,
+  #insp-form > label textarea:focus {
+    outline: 0;
+    border-color: #252525;
+    box-shadow: 0 0 0 3px rgba(37, 37, 37, 0.12);
+  }
+  #insp-form > label input:not([type='checkbox'])[type='file'] {
+    padding: 22px 14px;
+    border: 2px dashed #cfcfcf;
+    border-radius: 12px;
+    background: #fafafa;
+    cursor: pointer;
+    font-size: 14px;
+    color: #666;
+  }
+  #insp-form > label input:not([type='checkbox'])[type='file']:hover {
+    border-color: #252525;
+  }
+  #insp-form input[type='file']::file-selector-button {
+    margin-right: 12px;
+    border: 0;
+    border-radius: 999px;
+    background: #252525;
+    color: #fff;
+    padding: 8px 16px;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #insp-form .insp-check {
+    background: #f7f7f7;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 13px;
+    line-height: 1.5;
+    font-weight: 400;
+    color: #444;
+  }
+  #insp-form .insp-check input {
+    accent-color: #252525;
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+    margin-top: 2px;
+  }
+  .insp-privacy {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #777;
+  }
+  #insp-submit {
+    width: 100%;
+    padding: 15px 22px;
+    border-radius: 999px;
+    font-size: 16px;
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+    transition:
+      transform 0.15s,
+      box-shadow 0.15s,
+      background 0.15s;
+  }
+  #insp-submit:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+  }
+  #insp-submit:disabled {
+    opacity: 0.6;
+    cursor: progress;
+    transform: none;
+  }
+  .insp-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    right: 16px;
+    top: 16px;
+    border-radius: 50%;
+    background: #f1f1f1;
+    color: #252525;
+    font-size: 22px;
+    line-height: 1;
+  }
+  .insp-close:hover {
+    background: #e2e2e2;
+  }
+  @media (max-width: 550px) {
+    .insp-lb-nav {
+      width: 38px;
+      height: 38px;
+    }
+    #insp-lightbox {
+      width: 100vw;
+      max-height: 100vh;
+      border-radius: 0;
+    }
+    .insp-lb-stage img {
+      max-height: 62vh;
+    }
+  }
+  @media (max-width: 550px) {
+    .insp-grid {
+      columns: 2 140px;
+      column-gap: 10px;
+    }
+    .insp-card {
+      margin-bottom: 10px;
+    }
+  }
 </style>
 <script>
-(()=>{const root=document.getElementById('inspiration-app');if(!root)return;const api=root.dataset.api,grid=document.getElementById('insp-grid'),dialog=document.getElementById('insp-dialog'),form=document.getElementById('insp-form'),feedback=document.getElementById('insp-feedback'),more=document.getElementById('insp-more');let page=0,siteKey='',widgetId=null,consentVersion='';
-const node=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e};
-const photos=[],lb=document.getElementById('insp-lightbox'),lbImg=document.getElementById('insp-lb-img'),lbCap=document.getElementById('insp-lb-cap'),lbPrev=document.getElementById('insp-lb-prev'),lbNext=document.getElementById('insp-lb-next');let cur=0;
-const pcache=new Map();function productInfo(h){if(!pcache.has(h))pcache.set(h,fetch('/products/'+encodeURIComponent(h)+'.js').then(r=>r.ok?r.json():null).then(d=>d&&d.title?{title:d.title,url:d.url||'/products/'+encodeURIComponent(h),img:d.featured_image||(d.images&&d.images[0])||'',available:d.available!==false}:null).catch(()=>null));return pcache.get(h)}
-function chip(h,into,guard){productInfo(h).then(p=>{if(!p||(guard&&!guard()))return;const a=node('a','insp-product');a.href=p.url;if(p.img){const t=node('img','insp-pthumb');t.src=p.img.replace(/(\.\w+)(\?|$)/,'_100x100_crop_center$1$2');t.alt='';t.width=44;t.height=44;a.append(t)}a.append(node('span','',p.title+(p.available?'':' (utsolgt)')+' →'));into.append(a)})}
-function show(i){if(i<0||i>=photos.length)return;cur=i;const p=photos[i];lbImg.src=p.imageUrl;lbImg.alt=p.description||'Inspirasjonsbilde';lbCap.replaceChildren();if(p.description)lbCap.append(node('div','',p.description));if(p.display_name)lbCap.append(node('span','insp-by',`Delt av ${p.display_name}`));if(p.product_handle)chip(p.product_handle,lbCap,()=>cur===i);lbPrev.hidden=i===0;lbNext.hidden=i===photos.length-1&&page===null}
-async function step(d){if(d>0&&cur===photos.length-1&&page!==null)await load();show(cur+d)}
-lbPrev.onclick=()=>step(-1);lbNext.onclick=()=>step(1);document.getElementById('insp-lb-close').onclick=()=>lb.close();
-lb.addEventListener('keydown',e=>{if(e.key==='ArrowLeft'){e.preventDefault();step(-1)}else if(e.key==='ArrowRight'){e.preventDefault();step(1)}});
-lb.addEventListener('click',e=>{if(e.target===lb)lb.close()});
-lb.addEventListener('close',()=>{lbImg.removeAttribute('src')});
-let tx=null;lb.addEventListener('touchstart',e=>{tx=e.touches[0].clientX},{passive:true});lb.addEventListener('touchend',e=>{if(tx===null)return;const dx=e.changedTouches[0].clientX-tx;tx=null;if(Math.abs(dx)>50)step(dx<0?1:-1)});
-const skel=()=>{grid.setAttribute('aria-busy','true');[220,300,180,260,320,200,280,240].forEach(h=>{const s=node('div','insp-card insp-skel');s.style.height=h+'px';s.setAttribute('aria-hidden','true');grid.append(s)})};
-const clearSkel=()=>{grid.removeAttribute('aria-busy');grid.querySelectorAll('.insp-skel').forEach(e=>e.remove())};
-const empty=()=>{const d=node('div','insp-empty');d.append(node('strong','','Ingen bilder ennå'),node('p','','Bli den første til å dele et bilde med fellesskapet.'));const b=node('button','','Del ditt bilde');b.type='button';b.onclick=()=>document.getElementById('insp-open').click();d.append(b);grid.append(d)};
-async function load(){more.disabled=true;const first=page===0&&!photos.length;if(first)skel();try{const r=await fetch(`${api}/api/gallery?page=${page}`);if(!r.ok)throw Error('Kunne ikke hente bilder');const data=await r.json();clearSkel();for(const p of data.photos){const fig=node('figure','insp-card'),img=node('img');img.src=p.thumbUrl||p.imageUrl;if(p.thumbUrl)img.onerror=()=>{img.onerror=null;img.src=p.imageUrl};if(p.width&&p.height){img.width=p.width;img.height=p.height}img.decoding='async';img.loading='lazy';img.alt=p.description||'Inspirasjonsbilde';const idx=photos.push(p)-1,zoom=node('button','insp-zoom');zoom.type='button';zoom.setAttribute('aria-label','Forstørr bilde'+(p.description?': '+p.description:''));zoom.onclick=()=>{show(idx);if(!lb.open)lb.showModal()};zoom.append(img);fig.append(zoom);const cap=node('figcaption');if(p.description)cap.append(node('div','',p.description));if(p.display_name)cap.append(node('span','insp-by',`Delt av ${p.display_name}`));if(p.product_handle)chip(p.product_handle,cap);fig.append(cap);grid.append(fig)}if(!photos.length)empty();page=data.nextPage;more.hidden=page===null}catch(e){clearSkel();grid.append(node('p','',e.message))}finally{more.disabled=false}}
-async function config(){const r=await fetch(`${api}/api/config`);if(!r.ok)throw Error('Kunne ikke laste skjema');siteKey=(await r.json()).siteKey;const c=await fetch(`${api}/api/consent`);if(!c.ok)throw Error('Kunne ikke laste samtykketekst');const d=await c.json();consentVersion=d.version;document.getElementById('insp-gallery-text').textContent=d.galleryText;document.getElementById('insp-marketing-text').textContent=d.marketingText}
-function turnstile(){if(!siteKey)return;if(window.turnstile){widgetId=window.turnstile.render('#insp-turnstile',{sitekey:siteKey});return}const script=document.createElement('script');script.src='https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';script.onload=()=>{widgetId=window.turnstile.render('#insp-turnstile',{sitekey:siteKey})};document.head.append(script)}
-function convert(file){return new Promise((resolve,reject)=>{const img=new Image(),url=URL.createObjectURL(file);img.onload=()=>{const scale=Math.min(1,2000/Math.max(img.width,img.height));const canvas=document.createElement('canvas');canvas.width=Math.round(img.width*scale);canvas.height=Math.round(img.height*scale);canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);URL.revokeObjectURL(url);canvas.toBlob(b=>b?resolve(b):reject(Error('Kunne ikke behandle bildet')),'image/webp',.85)};img.onerror=()=>{URL.revokeObjectURL(url);reject(Error('Ugyldig bildefil'))};img.src=url?url:''})}
-async function products(){try{const sel=document.getElementById('insp-products');for(let pg=1;pg<=10;pg++){const r=await fetch('/products.json?limit=250&page='+pg);if(!r.ok)break;const list=(await r.json()).products||[];for(const p of list){const o=document.createElement('option');o.value=p.handle;o.textContent=p.title;sel.append(o)}if(list.length<250)break}}catch{}}
-const showReceipt=on=>{for(const c of form.children){if(c.id==='insp-feedback'||c.id==='insp-close'||c.tagName==='H2')continue;c.hidden=on}};
-document.getElementById('insp-open').onclick=async()=>{if(form.dataset.done){form.reset();showReceipt(false);feedback.textContent='';delete form.dataset.done;window.turnstile?.reset(widgetId)}dialog.showModal();if(!siteKey){try{await config();turnstile()}catch(e){feedback.textContent=e.message}}};document.getElementById('insp-close').onclick=()=>dialog.close();more.onclick=load;
-form.onsubmit=async e=>{e.preventDefault();const button=document.getElementById('insp-submit');button.disabled=true;feedback.textContent='Laster opp …';try{const f=new FormData(form),file=f.get('image');if(!file||file.size>15*1024*1024)throw Error('Velg et bilde under 15 MB');const blob=await convert(file);if(blob.size>8*1024*1024)throw Error('Bildet er for stort');f.set('image',blob,'photo.webp');f.set('galleryConsent',String(f.get('galleryConsent')==='on'));f.set('marketingConsent',String(f.get('marketingConsent')==='on'));f.set('turnstileToken',window.turnstile?.getResponse(widgetId)||'');f.set('consentVersion',consentVersion);const r=await fetch(`${api}/api/submit`,{method:'POST',body:f});const data=await r.json();if(!r.ok)throw Error(data.error||'Opplasting feilet');const link=`${api}/remove.html?id=${encodeURIComponent(data.id)}&token=${encodeURIComponent(data.removalToken)}`;feedback.replaceChildren(node('strong','','Takk! Bildet er sendt til godkjenning.'),node('p','','Ta vare på denne slettelenken. Det er den eneste måten å fjerne bildet på, og vi kan ikke sende den på nytt.'));const a=node('a','','Administrer eller slett bildet');a.href=link;a.target='_blank';a.rel='noopener';const inp=node('input');inp.readOnly=true;inp.setAttribute('value',link);inp.value=link;inp.setAttribute('aria-label','Slettelenke');const copy=node('button','','Kopier lenke');copy.type='button';copy.onclick=async()=>{try{await navigator.clipboard.writeText(link);copy.textContent='Kopiert!'}catch{inp.select();copy.textContent='Marker og kopier manuelt'}};feedback.append(a,inp,copy);form.reset();showReceipt(true);form.dataset.done='1'}catch(err){feedback.textContent=err.message}finally{button.disabled=false;window.turnstile?.reset(widgetId)}};
-load();products();})();
+  (() => {
+    const root = document.getElementById('inspiration-app');
+    if (!root) return;
+    const api = root.dataset.api,
+      grid = document.getElementById('insp-grid'),
+      dialog = document.getElementById('insp-dialog'),
+      form = document.getElementById('insp-form'),
+      feedback = document.getElementById('insp-feedback'),
+      more = document.getElementById('insp-more');
+    let page = 0,
+      siteKey = '',
+      widgetId = null,
+      consentVersion = '';
+    const node = (tag, cls, text) => {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text) e.textContent = text;
+      return e;
+    };
+    const photos = [],
+      lb = document.getElementById('insp-lightbox'),
+      lbImg = document.getElementById('insp-lb-img'),
+      lbCap = document.getElementById('insp-lb-cap'),
+      lbPrev = document.getElementById('insp-lb-prev'),
+      lbNext = document.getElementById('insp-lb-next');
+    let cur = 0;
+    const pcache = new Map();
+    function productInfo(h) {
+      if (!pcache.has(h))
+        pcache.set(
+          h,
+          fetch('/products/' + encodeURIComponent(h) + '.js')
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) =>
+              d && d.title
+                ? {
+                    title: d.title,
+                    url: d.url || '/products/' + encodeURIComponent(h),
+                    img: d.featured_image || (d.images && d.images[0]) || '',
+                    available: d.available !== false,
+                  }
+                : null,
+            )
+            .catch(() => null),
+        );
+      return pcache.get(h);
+    }
+    function chip(h, into, guard) {
+      productInfo(h).then((p) => {
+        if (!p || (guard && !guard())) return;
+        const a = node('a', 'insp-product');
+        a.href = p.url;
+        if (p.img) {
+          const t = node('img', 'insp-pthumb');
+          t.src = p.img.replace(/(\.\w+)(\?|$)/, '_100x100_crop_center$1$2');
+          t.alt = '';
+          t.width = 44;
+          t.height = 44;
+          a.append(t);
+        }
+        a.append(node('span', '', p.title + (p.available ? '' : ' (utsolgt)') + ' →'));
+        into.append(a);
+      });
+    }
+    function show(i) {
+      if (i < 0 || i >= photos.length) return;
+      cur = i;
+      const p = photos[i];
+      lbImg.src = p.imageUrl;
+      lbImg.alt = p.description || 'Inspirasjonsbilde';
+      lbCap.replaceChildren();
+      if (p.description) lbCap.append(node('div', '', p.description));
+      if (p.display_name) lbCap.append(node('span', 'insp-by', `Delt av ${p.display_name}`));
+      if (p.product_handle) chip(p.product_handle, lbCap, () => cur === i);
+      lbPrev.hidden = i === 0;
+      lbNext.hidden = i === photos.length - 1 && page === null;
+    }
+    async function step(d) {
+      if (d > 0 && cur === photos.length - 1 && page !== null) await load();
+      show(cur + d);
+    }
+    lbPrev.onclick = () => step(-1);
+    lbNext.onclick = () => step(1);
+    document.getElementById('insp-lb-close').onclick = () => lb.close();
+    lb.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        step(-1);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        step(1);
+      }
+    });
+    lb.addEventListener('click', (e) => {
+      if (e.target === lb) lb.close();
+    });
+    lb.addEventListener('close', () => {
+      lbImg.removeAttribute('src');
+    });
+    let tx = null;
+    lb.addEventListener(
+      'touchstart',
+      (e) => {
+        tx = e.touches[0].clientX;
+      },
+      { passive: true },
+    );
+    lb.addEventListener('touchend', (e) => {
+      if (tx === null) return;
+      const dx = e.changedTouches[0].clientX - tx;
+      tx = null;
+      if (Math.abs(dx) > 50) step(dx < 0 ? 1 : -1);
+    });
+    const skel = () => {
+      grid.setAttribute('aria-busy', 'true');
+      [220, 300, 180, 260, 320, 200, 280, 240].forEach((h) => {
+        const s = node('div', 'insp-card insp-skel');
+        s.style.height = h + 'px';
+        s.setAttribute('aria-hidden', 'true');
+        grid.append(s);
+      });
+    };
+    const clearSkel = () => {
+      grid.removeAttribute('aria-busy');
+      grid.querySelectorAll('.insp-skel').forEach((e) => e.remove());
+    };
+    const empty = () => {
+      const d = node('div', 'insp-empty');
+      d.append(
+        node('strong', '', 'Ingen bilder ennå'),
+        node('p', '', 'Bli den første til å dele et bilde med fellesskapet.'),
+      );
+      const b = node('button', '', 'Del ditt bilde');
+      b.type = 'button';
+      b.onclick = () => document.getElementById('insp-open').click();
+      d.append(b);
+      grid.append(d);
+    };
+    async function load() {
+      more.disabled = true;
+      const first = page === 0 && !photos.length;
+      if (first) skel();
+      try {
+        const r = await fetch(`${api}/api/gallery?page=${page}`);
+        if (!r.ok) throw Error('Kunne ikke hente bilder');
+        const data = await r.json();
+        clearSkel();
+        for (const p of data.photos) {
+          const fig = node('figure', 'insp-card'),
+            img = node('img');
+          img.src = p.thumbUrl || p.imageUrl;
+          if (p.thumbUrl)
+            img.onerror = () => {
+              img.onerror = null;
+              img.src = p.imageUrl;
+            };
+          if (p.width && p.height) {
+            img.width = p.width;
+            img.height = p.height;
+          }
+          img.decoding = 'async';
+          img.loading = 'lazy';
+          img.alt = p.description || 'Inspirasjonsbilde';
+          const idx = photos.push(p) - 1,
+            zoom = node('button', 'insp-zoom');
+          zoom.type = 'button';
+          zoom.setAttribute('aria-label', 'Forstørr bilde' + (p.description ? ': ' + p.description : ''));
+          zoom.onclick = () => {
+            show(idx);
+            if (!lb.open) lb.showModal();
+          };
+          zoom.append(img);
+          fig.append(zoom);
+          const cap = node('figcaption');
+          if (p.description) cap.append(node('div', '', p.description));
+          if (p.display_name) cap.append(node('span', 'insp-by', `Delt av ${p.display_name}`));
+          if (p.product_handle) chip(p.product_handle, cap);
+          fig.append(cap);
+          grid.append(fig);
+        }
+        if (!photos.length) empty();
+        page = data.nextPage;
+        more.hidden = page === null;
+      } catch (e) {
+        clearSkel();
+        grid.append(node('p', '', e.message));
+      } finally {
+        more.disabled = false;
+      }
+    }
+    async function config() {
+      const r = await fetch(`${api}/api/config`);
+      if (!r.ok) throw Error('Kunne ikke laste skjema');
+      siteKey = (await r.json()).siteKey;
+      const c = await fetch(`${api}/api/consent`);
+      if (!c.ok) throw Error('Kunne ikke laste samtykketekst');
+      const d = await c.json();
+      consentVersion = d.version;
+      document.getElementById('insp-gallery-text').textContent = d.galleryText;
+      document.getElementById('insp-marketing-text').textContent = d.marketingText;
+    }
+    function turnstile() {
+      if (!siteKey) return;
+      if (window.turnstile) {
+        widgetId = window.turnstile.render('#insp-turnstile', { sitekey: siteKey });
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      script.onload = () => {
+        widgetId = window.turnstile.render('#insp-turnstile', { sitekey: siteKey });
+      };
+      document.head.append(script);
+    }
+    function convert(file) {
+      return new Promise((resolve, reject) => {
+        const img = new Image(),
+          url = URL.createObjectURL(file);
+        img.onload = () => {
+          const scale = Math.min(1, 2000 / Math.max(img.width, img.height));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          URL.revokeObjectURL(url);
+          canvas.toBlob((b) => (b ? resolve(b) : reject(Error('Kunne ikke behandle bildet'))), 'image/webp', 0.85);
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(Error('Ugyldig bildefil'));
+        };
+        img.src = url ? url : '';
+      });
+    }
+    async function products() {
+      try {
+        const sel = document.getElementById('insp-products');
+        for (let pg = 1; pg <= 10; pg++) {
+          const r = await fetch('/products.json?limit=250&page=' + pg);
+          if (!r.ok) break;
+          const list = (await r.json()).products || [];
+          for (const p of list) {
+            const o = document.createElement('option');
+            o.value = p.handle;
+            o.textContent = p.title;
+            sel.append(o);
+          }
+          if (list.length < 250) break;
+        }
+      } catch {}
+    }
+    const showReceipt = (on) => {
+      for (const c of form.children) {
+        if (c.id === 'insp-feedback' || c.id === 'insp-close' || c.tagName === 'H2') continue;
+        c.hidden = on;
+      }
+    };
+    document.getElementById('insp-open').onclick = async () => {
+      if (form.dataset.done) {
+        form.reset();
+        showReceipt(false);
+        feedback.textContent = '';
+        delete form.dataset.done;
+        window.turnstile?.reset(widgetId);
+      }
+      dialog.showModal();
+      if (!siteKey) {
+        try {
+          await config();
+          turnstile();
+        } catch (e) {
+          feedback.textContent = e.message;
+        }
+      }
+    };
+    document.getElementById('insp-close').onclick = () => dialog.close();
+    more.onclick = load;
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const button = document.getElementById('insp-submit');
+      button.disabled = true;
+      feedback.textContent = 'Laster opp …';
+      try {
+        const f = new FormData(form),
+          file = f.get('image');
+        if (!file || file.size > 15 * 1024 * 1024) throw Error('Velg et bilde under 15 MB');
+        const blob = await convert(file);
+        if (blob.size > 8 * 1024 * 1024) throw Error('Bildet er for stort');
+        f.set('image', blob, 'photo.webp');
+        f.set('galleryConsent', String(f.get('galleryConsent') === 'on'));
+        f.set('marketingConsent', String(f.get('marketingConsent') === 'on'));
+        f.set('turnstileToken', window.turnstile?.getResponse(widgetId) || '');
+        f.set('consentVersion', consentVersion);
+        const r = await fetch(`${api}/api/submit`, { method: 'POST', body: f });
+        const data = await r.json();
+        if (!r.ok) throw Error(data.error || 'Opplasting feilet');
+        const link = `${api}/remove.html?id=${encodeURIComponent(data.id)}&token=${encodeURIComponent(data.removalToken)}`;
+        feedback.replaceChildren(
+          node('strong', '', 'Takk! Bildet er sendt til godkjenning.'),
+          node(
+            'p',
+            '',
+            'Ta vare på denne slettelenken. Det er den eneste måten å fjerne bildet på, og vi kan ikke sende den på nytt.',
+          ),
+        );
+        const a = node('a', '', 'Administrer eller slett bildet');
+        a.href = link;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        const inp = node('input');
+        inp.readOnly = true;
+        inp.setAttribute('value', link);
+        inp.value = link;
+        inp.setAttribute('aria-label', 'Slettelenke');
+        const copy = node('button', '', 'Kopier lenke');
+        copy.type = 'button';
+        copy.onclick = async () => {
+          try {
+            await navigator.clipboard.writeText(link);
+            copy.textContent = 'Kopiert!';
+          } catch {
+            inp.select();
+            copy.textContent = 'Marker og kopier manuelt';
+          }
+        };
+        feedback.append(a, inp, copy);
+        form.reset();
+        showReceipt(true);
+        form.dataset.done = '1';
+      } catch (err) {
+        feedback.textContent = err.message;
+      } finally {
+        button.disabled = false;
+        window.turnstile?.reset(widgetId);
+      }
+    };
+    load();
+    products();
+  })();
 </script>
