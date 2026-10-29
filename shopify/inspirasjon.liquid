@@ -22,6 +22,7 @@
           accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm"
           required
       ></label>
+      <div id="insp-preview" class="insp-preview" hidden></div>
       <p id="insp-feedback" role="status"></p>
       <label class="insp-check insp-off" id="insp-audio-row"
         ><input type="checkbox" name="includeAudio">
@@ -733,6 +734,12 @@
     }
   }
 </style>
+<style>
+  #insp-form .insp-drag { outline: 2px dashed currentColor; outline-offset: 4px; }
+  #insp-form .insp-preview img,
+  #insp-form .insp-preview video { display: block; max-width: 100%; max-height: 240px; margin: 8px auto; border-radius: 8px; }
+  #insp-form .insp-bar { width: 100%; height: 8px; }
+</style>
 <script>
   (() => {
     const root = document.getElementById('inspiration-app');
@@ -1010,14 +1017,16 @@
       };
       document.head.append(script);
     }
-    async function sendImage(f) {
-      const r = await fetch(`${api}/api/submit`, { method: 'POST', body: f });
-      return { ok: r.ok, data: await r.json() };
+    function sendImage(f, onPct) {
+      return sendXhr('/api/submit', f, onPct);
     }
     function sendVideo(f, onPct) {
+      return sendXhr('/api/submit-video', f, onPct);
+    }
+    function sendXhr(path, f, onPct) {
       return new Promise((resolve, reject) => {
         const x = new XMLHttpRequest();
-        x.open('POST', `${api}/api/submit-video`);
+        x.open('POST', `${api}${path}`);
         x.upload.onprogress = (e) => {
           if (e.lengthComputable) onPct(Math.round((e.loaded / e.total) * 100));
         };
@@ -1096,15 +1105,59 @@
     const fileProblem = (msg) => Object.assign(Error(msg), { file: true });
     const rejectFile = (msg) => {
       fileInput.value = '';
+      clearPreview();
       syncAudio();
       say(msg + ' Velg en annen fil.', true);
     };
+    const preview = document.getElementById('insp-preview');
+    const bar = document.createElement('progress');
+    bar.className = 'insp-bar';
+    bar.max = 100;
+    bar.hidden = true;
+    statusEl.before(bar);
+    const clearPreview = () => {
+      preview.querySelectorAll('img,video').forEach((m) => URL.revokeObjectURL(m.src));
+      preview.replaceChildren();
+      preview.hidden = true;
+    };
+    const showPreview = (f) => {
+      clearPreview();
+      const m = document.createElement(isVideoFile(f) ? 'video' : 'img');
+      m.src = URL.createObjectURL(f);
+      if (m.tagName === 'VIDEO') {
+        m.muted = true;
+        m.controls = true;
+        m.preload = 'metadata';
+      } else m.alt = 'Forhåndsvisning';
+      preview.append(m);
+      preview.hidden = false;
+    };
+    form.addEventListener('reset', clearPreview);
+    const label = fileInput.closest('label');
+    ['dragenter', 'dragover'].forEach((t) =>
+      label.addEventListener(t, (e) => {
+        e.preventDefault();
+        label.classList.add('insp-drag');
+      }),
+    );
+    ['dragleave', 'drop'].forEach((t) => label.addEventListener(t, () => label.classList.remove('insp-drag')));
+    label.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const f = e.dataTransfer?.files?.[0];
+      if (!f) return;
+      const dt = new DataTransfer();
+      dt.items.add(f);
+      fileInput.files = dt.files;
+      fileInput.dispatchEvent(new Event('change'));
+    });
     fileInput.addEventListener('change', () => {
       say('');
       setStatus('');
       syncAudio();
+      clearPreview();
       const f = fileInput.files[0];
       if (!f) return;
+      showPreview(f);
       const video = isVideoFile(f);
       if (f.size > (video ? 150 : 15) * 1024 * 1024)
         return rejectFile(video ? 'Videoen er for stor (maks 150 MB).' : 'Bildet er for stort (maks 15 MB).');
@@ -1147,6 +1200,8 @@
       button.disabled = true;
       say('');
       setStatus('Laster opp …');
+      bar.value = 0;
+      bar.hidden = false;
       try {
         const f = new FormData(form),
           file = f.get('image'),
@@ -1170,9 +1225,13 @@
         f.set('consentVersion', consentVersion);
         const { ok, data } = isVideo
           ? await sendVideo(f, (pct) => {
+              bar.value = pct;
               setStatus(pct < 100 ? `Laster opp … ${pct} %` : 'Sjekker videoen …');
             })
-          : await sendImage(f);
+          : await sendImage(f, (pct) => {
+              bar.value = pct;
+              setStatus(pct < 100 ? `Laster opp … ${pct} %` : 'Sender inn …');
+            });
         if (!ok) throw data.field === 'file' ? fileProblem(data.error) : Error(data.error || 'Opplasting feilet');
         const link = `${api}/remove.html?id=${encodeURIComponent(data.id)}&token=${encodeURIComponent(data.removalToken)}`;
         statusEl.replaceChildren(
@@ -1223,6 +1282,7 @@
         } else setStatus(err.message, true);
       } finally {
         button.disabled = false;
+        bar.hidden = true;
         window.turnstile?.reset(widgetId);
       }
     };
