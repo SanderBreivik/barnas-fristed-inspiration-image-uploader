@@ -9,7 +9,8 @@ import { now, error } from "../util.js";
 import { log, errFields } from "../log.js";
 import { admin } from "../auth.js";
 import { sameOriginOnly } from "../origins.js";
-import { removeThumb } from "../images.js";
+import { removeMedia, getThumb } from "../images.js";
+import { videoFile } from "../video.js";
 import { backupDatabase, enforceRetention, reconcile, retryDeletions } from "../maintenance.js";
 import { maint, retentionOpts, logRetention } from "../jobs.js";
 
@@ -26,7 +27,7 @@ adminRouter.get("/api/admin/photos", admin, (req, res) => {
   res.json({
     photos: db
       .prepare(
-        "SELECT id,display_name,description,product_handle,status,marketing_consent,submitted_at FROM photos WHERE status=? ORDER BY submitted_at DESC LIMIT 100",
+        "SELECT id,display_name,description,product_handle,status,marketing_consent,submitted_at,media_type,media_status,duration_ms FROM photos WHERE status=? ORDER BY submitted_at DESC LIMIT 100",
       )
       .all(status),
   });
@@ -34,8 +35,14 @@ adminRouter.get("/api/admin/photos", admin, (req, res) => {
 
 adminRouter.get("/api/admin/preview/:id", admin, async (req, res) => {
   try {
-    const row = db.prepare("SELECT object_key FROM photos WHERE id=?").get(req.params.id);
+    const row = db
+      .prepare("SELECT id,object_key,media_type,media_status FROM photos WHERE id=?")
+      .get(req.params.id);
     if (!row) return error(res, "Not found", 404);
+    if (row.media_type === "video") {
+      if (row.media_status !== "ready") return error(res, "Not ready", 404);
+      return res.set("Content-Type", "image/webp").send(await getThumb(row));
+    }
     res.set("Content-Type", "image/webp").send(await storage.get(row.object_key));
   } catch (e) {
     log.error("admin_preview_failed", errFields(e));
@@ -43,18 +50,36 @@ adminRouter.get("/api/admin/preview/:id", admin, async (req, res) => {
   }
 });
 
+adminRouter.get("/api/admin/video/:id", admin, async (req, res) => {
+  try {
+    const row = db
+      .prepare("SELECT id,object_key FROM photos WHERE id=? AND media_type='video' AND media_status='ready'")
+      .get(req.params.id);
+    if (!row) return error(res, "Not found", 404);
+    const file = await videoFile(row);
+    res.sendFile(file, { cacheControl: false }, (err) => {
+      if (err && !res.headersSent) error(res, "Unavailable", 500);
+    });
+  } catch (e) {
+    log.error("admin_video_failed", errFields(e));
+    error(res, "Unavailable", 500);
+  }
+});
+
 adminRouter.post("/api/admin/photos/:id/:action", admin, async (req, res) => {
   const { id, action } = req.params;
   if (!["approve", "reject", "delete"].includes(action)) return error(res, "Invalid action");
-  const row = db.prepare("SELECT object_key,status FROM photos WHERE id=?").get(id);
+  const row = db.prepare("SELECT object_key,status,media_type,media_status FROM photos WHERE id=?").get(id);
   if (!row) return error(res, "Not found", 404);
   if (row.status === "deleted" && action !== "delete")
     return error(res, "Photo already deleted", 409);
+  if (action === "approve" && row.media_status !== "ready")
+    return error(res, "Videoen er ikke ferdig behandlet", 409);
   const status = { approve: "approved", reject: "rejected", delete: "deleted" }[action];
   db.prepare(
     "UPDATE photos SET status=?,approved_at=CASE WHEN ?='approved' THEN ? ELSE approved_at END,deleted_at=CASE WHEN ?='deleted' THEN ? ELSE deleted_at END WHERE id=?",
   ).run(status, status, now(), status, now(), id);
-  if (status !== "approved") removeThumb(id);
+  if (status !== "approved") removeMedia(id);
   if (action === "delete") {
     try {
       await storage.del(row.object_key);

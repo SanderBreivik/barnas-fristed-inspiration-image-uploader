@@ -4,7 +4,7 @@ primary_region = "arn"
   PORT = "8080"
   DATA_DIR = "/data"
   SHOP_ORIGIN = "https://barnasfristed.no"
-  CONSENT_VERSION = "2026-10-v2"
+  CONSENT_VERSION = "2026-10-v3"
 [http_service]
   internal_port = 8080
   force_https = true

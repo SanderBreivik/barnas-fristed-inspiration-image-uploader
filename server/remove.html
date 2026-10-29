@@ -3,7 +3,7 @@
   <meta charset="utf-8" /><meta
     name="viewport"
     content="width=device-width"
-  /><title>Fjern bilde</title
+  /><title>Fjern bilde eller video</title
   ><style>
     body {
       margin: 0;
@@ -94,13 +94,14 @@
         <img id="preview" alt="Ditt innsendte bilde" />
       </div>
       <div class="pad">
-        <h1>Fjern ditt bilde</h1>
+        <h1>Fjern ditt bilde eller din video</h1>
         <p id="status" class="badge" hidden></p>
         <p>
-          Bildet over er det du sendte inn. Trykk på knappen for å slette det
-          permanent. Du trenger ikke logge inn.
+          Forhåndsvisningen over er det du sendte inn (for en video vises
+          et stillbilde, og den kan mangle mens videoen behandles). Trykk på
+          knappen for å slette det permanent. Du trenger ikke logge inn.
         </p>
-        <button id="remove">Fjern bildet mitt</button>
+        <button id="remove">Fjern det jeg sendte inn</button>
         <p id="msg" role="status"></p>
       </div>
     </div>
@@ -115,6 +116,11 @@
       pending: "Venter på godkjenning",
       approved: "Publisert i galleriet",
       rejected: "Ikke publisert",
+    };
+    const MEDIA_LABEL = {
+      processing: "Videoen behandles. Den kan fjernes allerede nå.",
+      failed:
+        "Videoen kunne ikke behandles og blir ikke publisert. Du kan fjerne den her.",
     };
     const hidePreview = () => {
       thumb.hidden = true;
@@ -144,7 +150,10 @@
           badge.hidden = !badge.textContent;
         } else if (r.status === 410) {
           btn.disabled = true;
-          msg.textContent = "Bildet er allerede fjernet.";
+          msg.textContent = "Det er allerede fjernet.";
+        } else if (MEDIA_LABEL[r.headers.get("X-Media-Status")]) {
+          badge.textContent = MEDIA_LABEL[r.headers.get("X-Media-Status")];
+          badge.hidden = false;
         } else if (r.status === 403) {
           btn.disabled = true;
           msg.textContent =
@@ -153,7 +162,7 @@
       } catch {}
     })();
     btn.onclick = async () => {
-      if (!confirm("Vil du slette bildet?")) return;
+      if (!confirm("Vil du slette dette permanent?")) return;
       const u = new URL(location.href),
         id = u.searchParams.get("id"),
         token = u.searchParams.get("token");
@@ -171,14 +180,14 @@
         const d = await r.json().catch(() => ({}));
         if (r.status === 200) {
           msg.textContent = d.alreadyRemoved
-            ? "Bildet er allerede fjernet."
-            : "Bildet er fjernet.";
+            ? "Det er allerede fjernet."
+            : "Det er fjernet.";
           history.replaceState(null, "", "/remove.html");
           hidePreview();
           btn.disabled = true;
         } else if (r.status === 202) {
           msg.textContent =
-            "Bildet er fjernet fra galleriet. Slettingen fullføres; prøv igjen senere for å bekrefte.";
+            "Det er fjernet fra galleriet. Slettingen fullføres; prøv igjen senere for å bekrefte.";
           btn.disabled = false;
         } else if (r.status === 403) {
           msg.textContent =

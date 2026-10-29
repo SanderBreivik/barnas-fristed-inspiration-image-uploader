@@ -18,3 +18,10 @@ if (!columns.includes("storage_deleted_at"))
 // filled in the first time a thumbnail is generated).
 if (!columns.includes("width")) db.exec("ALTER TABLE photos ADD COLUMN width INTEGER");
 if (!columns.includes("height")) db.exec("ALTER TABLE photos ADD COLUMN height INTEGER");
+// Video support: existing rows are images that are ready. media_status goes
+// processing -> ready, or failed (videos are compressed in the background).
+if (!columns.includes("media_type"))
+  db.exec("ALTER TABLE photos ADD COLUMN media_type TEXT NOT NULL DEFAULT 'image'");
+if (!columns.includes("media_status"))
+  db.exec("ALTER TABLE photos ADD COLUMN media_status TEXT NOT NULL DEFAULT 'ready'");
+if (!columns.includes("duration_ms")) db.exec("ALTER TABLE photos ADD COLUMN duration_ms INTEGER");

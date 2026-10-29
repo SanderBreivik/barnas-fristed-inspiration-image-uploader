@@ -10,7 +10,7 @@ import { sha, now, error } from "../util.js";
 import { log, errFields } from "../log.js";
 import { CONSENT_VERSION } from "../consent.js";
 import { allowRemovalOrigin } from "../origins.js";
-import { removeThumb } from "../images.js";
+import { removeMedia, getThumb } from "../images.js";
 
 export const removalRouter = Router();
 
@@ -27,14 +27,24 @@ removalRouter.post("/api/remove/preview", allowRemovalOrigin, async (req, res) =
   if (typeof id !== "string" || typeof token !== "string" || !id || !token)
     return error(res, "Invalid removal link", 403);
   const row = db
-    .prepare("SELECT object_key,removal_token_hash,status FROM photos WHERE id=?")
+    .prepare("SELECT id,object_key,removal_token_hash,status,media_type,media_status FROM photos WHERE id=?")
     .get(id);
   const expected = Buffer.from(row?.removal_token_hash || sha("none"), "hex");
   if (!row || !timingSafeEqual(Buffer.from(sha(token), "hex"), expected))
     return error(res, "Invalid removal link", 403);
   if (row.status === "deleted") return error(res, "Already removed", 410);
   try {
-    const image = await storage.get(row.object_key);
+    // Videos preview as their poster frame (not available while still processing).
+    const image =
+      row.media_type === "video"
+        ? row.media_status === "ready"
+          ? await getThumb(row)
+          : null
+        : await storage.get(row.object_key);
+    if (!image) {
+      res.set({ "X-Photo-Status": row.status, "X-Media-Status": row.media_status });
+      return error(res, "Preview unavailable", 404);
+    }
     res.set({
       "Content-Type": "image/webp",
       "X-Content-Type-Options": "nosniff",
@@ -72,7 +82,7 @@ removalRouter.post("/api/remove", allowRemovalOrigin, async (req, res) => {
   }
   try {
     await storage.del(row.object_key);
-    removeThumb(id);
+    removeMedia(id);
     db.prepare("UPDATE photos SET storage_deleted_at=? WHERE id=?").run(now(), id);
   } catch (e) {
     log.error("storage_delete_failed", { photoId: id, source: "customer", ...errFields(e) });

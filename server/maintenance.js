@@ -111,14 +111,14 @@ export function verifyBackup(gzBuffer, { restoreTo } = {}) {
 // Compare database rows with objects under photos/. Read-only.
 export async function reconcile({ db, storage }) {
   const objects = new Set((await storage.list("photos/")).map((o) => o.key));
-  const rows = db.prepare("SELECT id,object_key,status FROM photos").all();
+  const rows = db.prepare("SELECT id,object_key,status,media_status FROM photos").all();
   const known = new Set(rows.map((r) => r.object_key));
   const missingObjects = [];
   const pendingDeletions = [];
   for (const r of rows) {
     if (r.status === "deleted") {
       if (objects.has(r.object_key)) pendingDeletions.push(r.id);
-    } else if (!objects.has(r.object_key)) {
+    } else if (r.media_status === "ready" && !objects.has(r.object_key)) {
       missingObjects.push(r.id);
     }
   }

@@ -13,6 +13,7 @@ import { startLimitCleanup } from "./limits.js";
 import { startBackgroundJobs } from "./jobs.js";
 import { publicRouter } from "./routes/public.js";
 import { submitRouter } from "./routes/submit.js";
+import { submitVideoRouter } from "./routes/submit-video.js";
 import { removalRouter } from "./routes/removal.js";
 import { adminRouter } from "./routes/admin.js";
 
@@ -45,6 +46,7 @@ app.use(cors);
 app.use(express.json({ limit: "12kb" }));
 app.use(publicRouter);
 app.use(submitRouter);
+app.use(submitVideoRouter);
 app.use(removalRouter);
 app.use(adminRouter);
 

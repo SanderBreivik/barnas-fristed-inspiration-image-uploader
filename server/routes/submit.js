@@ -36,24 +36,78 @@ const MAX_PROCESSING = num(env.IMAGE_MAX_CONCURRENCY, 2);
 let processing = 0;
 const ALLOWED_FORMATS = ["jpeg", "png", "webp", "heif", "avif"];
 
+// Checks shared by image and video uploads. Sends the error response itself and
+// returns null when the upload must be refused.
+export async function admit(req, res, fileMessage) {
+  const quotaKey = "quota:" + sha(req.ip || "unknown");
+  const q = limitRow(quotaKey);
+  if (q && q.count >= LIMITS.quotaMax) {
+    res.set("Retry-After", retryAfter(q));
+    error(res, "Du har sendt inn mange bilder eller videoer nylig. Prøv igjen i morgen.", 429);
+    return null;
+  }
+  if (!(await turnstile(clean(req.body.turnstileToken, 4096), req.ip))) {
+    log.warn("turnstile_failed");
+    error(res, "Verifiseringen feilet. Last inn siden på nytt og prøv igjen.", 403);
+    return null;
+  }
+  if (req.body.galleryConsent !== "true") {
+    error(res, "Gallery permission required");
+    return null;
+  }
+  if (req.body.consentVersion !== CONSENT_VERSION) {
+    error(res, "Samtykketeksten er oppdatert. Last siden på nytt og prøv igjen.", 409);
+    return null;
+  }
+  if (!req.file) {
+    error(res, fileMessage);
+    return null;
+  }
+  const product = clean(req.body.productHandle, 120);
+  if (product && !/^[a-z0-9-]+$/.test(product)) {
+    error(res, "Invalid product");
+    return null;
+  }
+  return { quotaKey, product };
+}
+
+// Inserts the photo row and its "submitted" consent event in one transaction.
+export function record(req, { id, token, key, product, width, height, media = "image", durationMs = null }) {
+  const marketing = req.body.marketingConsent === "true" ? 1 : 0,
+    // Record exactly the text(s) the customer saw and agreed to.
+    consentRecord = marketing ? `${CONSENT_TEXT}\n---\n${MARKETING_TEXT}` : CONSENT_TEXT,
+    timestamp = now();
+  db.transaction(() => {
+    db.prepare(
+      "INSERT INTO photos(id,object_key,display_name,description,product_handle,status,gallery_consent,marketing_consent,consent_version,consent_text,submitted_at,removal_token_hash,width,height,media_type,media_status,duration_ms) VALUES(?,?,?,?,?,'pending',1,?,?,?,?,?,?,?,?,?,?)",
+    ).run(
+      id,
+      key,
+      clean(req.body.displayName, 80),
+      clean(req.body.description, 500),
+      product || null,
+      marketing,
+      CONSENT_VERSION,
+      consentRecord,
+      timestamp,
+      sha(token),
+      width ?? null,
+      height ?? null,
+      media,
+      media === "video" ? "processing" : "ready",
+      durationMs,
+    );
+    db.prepare(
+      "INSERT INTO consent_events(id,photo_id,action,version,consent_text,marketing_consent,created_at) VALUES(?,?,?,?,?,?,?)",
+    ).run(randomUUID(), id, "submitted", CONSENT_VERSION, consentRecord, marketing, timestamp);
+  })();
+}
+
 submitRouter.post("/api/submit", allowOrigin, submitAbuseLimit, uploadOne, async (req, res) => {
   try {
-    const quotaKey = "quota:" + sha(req.ip || "unknown");
-    const q = limitRow(quotaKey);
-    if (q && q.count >= LIMITS.quotaMax) {
-      res.set("Retry-After", retryAfter(q));
-      return error(res, "Du har sendt inn mange bilder nylig. Prøv igjen i morgen.", 429);
-    }
-    if (!(await turnstile(clean(req.body.turnstileToken, 4096), req.ip))) {
-      log.warn("turnstile_failed");
-      return error(res, "Verifiseringen feilet. Last inn siden på nytt og prøv igjen.", 403);
-    }
-    if (req.body.galleryConsent !== "true") return error(res, "Gallery permission required");
-    if (req.body.consentVersion !== CONSENT_VERSION)
-      return error(res, "Samtykketeksten er oppdatert. Last siden på nytt og prøv igjen.", 409);
-    if (!req.file) return error(res, "Image required");
-    const product = clean(req.body.productHandle, 120);
-    if (product && !/^[a-z0-9-]+$/.test(product)) return error(res, "Invalid product");
+    const ctx = await admit(req, res, "Image required");
+    if (!ctx) return;
+    const { quotaKey, product } = ctx;
     if (processing >= MAX_PROCESSING) {
       res.set("Retry-After", "10");
       return error(res, "Serveren er opptatt. Prøv igjen om litt.", 503);
@@ -83,11 +137,6 @@ submitRouter.post("/api/submit", allowOrigin, submitAbuseLimit, uploadOne, async
     const id = randomUUID(),
       token = randomUUID() + randomUUID(),
       key = `photos/${id}.webp`;
-    const marketing = req.body.marketingConsent === "true" ? 1 : 0,
-      version = CONSENT_VERSION,
-      // Record exactly the text(s) the customer saw and agreed to.
-      consentRecord = marketing ? `${CONSENT_TEXT}\n---\n${MARKETING_TEXT}` : CONSENT_TEXT,
-      timestamp = now();
     try {
       await storage.put(key, bytes);
     } catch (e) {
@@ -95,27 +144,7 @@ submitRouter.post("/api/submit", allowOrigin, submitAbuseLimit, uploadOne, async
       return error(res, "Kunne ikke lagre bildet. Prøv igjen senere.", 502);
     }
     try {
-      db.transaction(() => {
-        db.prepare(
-          "INSERT INTO photos(id,object_key,display_name,description,product_handle,status,gallery_consent,marketing_consent,consent_version,consent_text,submitted_at,removal_token_hash,width,height) VALUES(?,?,?,?,?,'pending',1,?,?,?,?,?,?,?)",
-        ).run(
-          id,
-          key,
-          clean(req.body.displayName, 80),
-          clean(req.body.description, 500),
-          product || null,
-          marketing,
-          version,
-          consentRecord,
-          timestamp,
-          sha(token),
-          dims.width,
-          dims.height,
-        );
-        db.prepare(
-          "INSERT INTO consent_events(id,photo_id,action,version,consent_text,marketing_consent,created_at) VALUES(?,?,?,?,?,?,?)",
-        ).run(randomUUID(), id, "submitted", version, consentRecord, marketing, timestamp);
-      })();
+      record(req, { id, token, key, product, width: dims.width, height: dims.height });
     } catch (e) {
       try {
         await storage.del(key);

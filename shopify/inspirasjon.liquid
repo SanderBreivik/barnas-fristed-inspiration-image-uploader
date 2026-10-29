@@ -6,22 +6,23 @@
       <h1>La deg inspirere</h1>
       <p>Se bildene fra fellesskapet og del din egen inspirasjon.</p>
     </div>
-    <button id="insp-open" type="button">Del ditt bilde</button>
+    <button id="insp-open" type="button">Del et bilde eller video</button>
   </div>
   <div id="insp-grid" class="insp-grid" aria-live="polite"></div>
   <button id="insp-more" hidden type="button">Vis flere bilder</button>
   <dialog id="insp-dialog">
     <form id="insp-form">
       <button class="insp-close" type="button" id="insp-close" aria-label="Lukk">×</button>
-      <h2>Del ditt bilde</h2>
-      <p>Bildet blir gjennomgått før det publiseres.</p>
+      <h2>Del et bilde eller video</h2>
+      <p>Bildet eller videoen blir gjennomgått før det publiseres.</p>
       <label
-        >Bilde (JPG, PNG eller WebP)<input
+        >Bilde eller video (JPG, PNG, WebP, MP4, MOV eller WebM – video maks 15 sekunder)<input
           type="file"
           name="image"
-          accept="image/jpeg,image/png,image/webp"
-          required></label
-      ><label>Navn (valgfritt)<input name="displayName" maxlength="80"></label
+          accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm"
+          required></label>
+      <p id="insp-feedback" role="status"></p>
+      <label>Navn (valgfritt)<input name="displayName" maxlength="80"></label
       ><label>Beskrivelse (valgfritt)<textarea name="description" maxlength="500"></textarea></label
       ><label
         >Produkt (valgfritt)<select name="productHandle" id="insp-products">
@@ -33,20 +34,19 @@
         ><input type="checkbox" name="marketingConsent"> <span id="insp-marketing-text"></span
       ></label>
       <p class="insp-privacy">
-        Vi lagrer bildet privat til det er godkjent. Se
+        Vi lagrer bildet eller videoen privat til det er godkjent. Se
         <a href="/policies/privacy-policy" target="_blank" rel="noopener">personvernerklæringen</a> for hvordan
         opplysninger behandles og hvor lenge de lagres.
       </p>
       <div id="insp-turnstile"></div>
       <button type="submit" id="insp-submit">Send til godkjenning</button>
-      <p id="insp-feedback" role="status"></p>
     </form>
   </dialog>
   <dialog id="insp-lightbox" aria-label="Forstørret bilde">
     <button type="button" class="insp-lb-close" id="insp-lb-close" aria-label="Lukk">×</button
     ><button type="button" class="insp-lb-nav insp-lb-prev" id="insp-lb-prev" aria-label="Forrige bilde">‹</button
     ><button type="button" class="insp-lb-nav insp-lb-next" id="insp-lb-next" aria-label="Neste bilde">›</button>
-    <div class="insp-lb-stage"><img id="insp-lb-img" alt=""></div>
+    <div class="insp-lb-stage"><img id="insp-lb-img" alt=""><video id="insp-lb-video" controls playsinline preload="metadata" hidden></video></div>
     <div class="insp-lb-cap" id="insp-lb-cap" aria-live="polite"></div>
   </dialog>
 </section>
@@ -261,7 +261,24 @@
   #insp-feedback {
     margin: 0;
   }
+  #insp-feedback:empty {
+    display: none;
+  }
+  #insp-feedback.insp-error {
+    padding: 12px 14px;
+    border: 1px solid #f1b5ae;
+    border-radius: 10px;
+    background: #fdecea;
+    color: #8a1f11;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+  #insp-feedback.insp-error::before {
+    content: '⚠\00a0';
+  }
   .insp-zoom {
+    position: relative;
     display: block;
     width: 100%;
     padding: 0;
@@ -272,6 +289,39 @@
   .insp-zoom:focus-visible {
     outline: 3px solid #252525;
     outline-offset: -3px;
+  }
+  .insp-play {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-left: 3px;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .insp-hover {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+  }
+  .insp-playing .insp-hover {
+    opacity: 1;
+  }
+  .insp-playing .insp-play {
+    opacity: 0;
   }
   #insp-lightbox {
     border: 0;
@@ -303,6 +353,15 @@
     max-width: 100%;
     max-height: 70vh;
     object-fit: contain;
+  }
+  .insp-lb-stage video {
+    display: block;
+    max-width: 100%;
+    max-height: 70vh;
+    background: #000;
+  }
+  .insp-lb-stage [hidden] {
+    display: none;
   }
   .insp-lb-cap {
     display: flex;
@@ -604,7 +663,8 @@
       max-height: 100vh;
       border-radius: 0;
     }
-    .insp-lb-stage img {
+    .insp-lb-stage img,
+    .insp-lb-stage video {
       max-height: 62vh;
     }
   }
@@ -643,7 +703,14 @@
       lbImg = document.getElementById('insp-lb-img'),
       lbCap = document.getElementById('insp-lb-cap'),
       lbPrev = document.getElementById('insp-lb-prev'),
-      lbNext = document.getElementById('insp-lb-next');
+      lbNext = document.getElementById('insp-lb-next'),
+      lbVid = document.getElementById('insp-lb-video');
+    const stopVid = () => {
+      lbVid.pause();
+      lbVid.removeAttribute('src');
+      lbVid.removeAttribute('poster');
+      lbVid.load();
+    };
     let cur = 0;
     const pcache = new Map();
     function productInfo(h) {
@@ -687,8 +754,19 @@
       if (i < 0 || i >= photos.length) return;
       cur = i;
       const p = photos[i];
-      lbImg.src = p.imageUrl;
-      lbImg.alt = p.description || 'Inspirasjonsbilde';
+      const vid = p.type === 'video';
+      lbImg.hidden = vid;
+      lbVid.hidden = !vid;
+      if (vid) {
+        lbVid.poster = p.thumbUrl;
+        lbVid.src = p.videoUrl;
+        lbVid.setAttribute('aria-label', p.description || 'Video');
+        lbVid.play().catch(() => {});
+      } else {
+        stopVid();
+        lbImg.src = p.imageUrl;
+        lbImg.alt = p.description || 'Inspirasjonsbilde';
+      }
       lbCap.replaceChildren();
       if (p.description) lbCap.append(node('div', '', p.description));
       if (p.display_name) lbCap.append(node('span', 'insp-by', `Delt av ${p.display_name}`));
@@ -704,6 +782,7 @@
     lbNext.onclick = () => step(1);
     document.getElementById('insp-lb-close').onclick = () => lb.close();
     lb.addEventListener('keydown', (e) => {
+      if (e.target === lbVid) return;
       if (e.key === 'ArrowLeft') {
         e.preventDefault();
         step(-1);
@@ -717,6 +796,7 @@
     });
     lb.addEventListener('close', () => {
       lbImg.removeAttribute('src');
+      stopVid();
     });
     let tx = null;
     lb.addEventListener(
@@ -732,6 +812,41 @@
       tx = null;
       if (Math.abs(dx) > 50) step(dx < 0 ? 1 : -1);
     });
+    const canHover = matchMedia('(hover: hover) and (pointer: fine)'),
+      reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+    function hoverPlay(zoom, p) {
+      let v = null,
+        t = 0;
+      const stop = () => {
+        clearTimeout(t);
+        if (v) {
+          v.pause();
+          v.removeAttribute('src');
+          v.load();
+          v.remove();
+          v = null;
+        }
+        zoom.classList.remove('insp-playing');
+      };
+      zoom.addEventListener('pointerenter', (e) => {
+        if (e.pointerType !== 'mouse' || !canHover.matches || reduceMotion.matches) return;
+        t = setTimeout(() => {
+          v = node('video', 'insp-hover');
+          v.muted = true;
+          v.loop = true;
+          v.playsInline = true;
+          v.preload = 'auto';
+          v.tabIndex = -1;
+          v.setAttribute('aria-hidden', 'true');
+          v.addEventListener('playing', () => zoom.classList.add('insp-playing'));
+          v.src = p.videoUrl;
+          zoom.append(v);
+          v.play().catch(stop);
+        }, 200);
+      });
+      zoom.addEventListener('pointerleave', stop);
+      zoom.addEventListener('click', stop);
+    }
     const skel = () => {
       grid.setAttribute('aria-busy', 'true');
       [220, 300, 180, 260, 320, 200, 280, 240].forEach((h) => {
@@ -751,7 +866,7 @@
         node('strong', '', 'Ingen bilder ennå'),
         node('p', '', 'Bli den første til å dele et bilde med fellesskapet.'),
       );
-      const b = node('button', '', 'Del ditt bilde');
+      const b = node('button', '', 'Del et bilde eller video');
       b.type = 'button';
       b.onclick = () => document.getElementById('insp-open').click();
       d.append(b);
@@ -785,12 +900,19 @@
           const idx = photos.push(p) - 1,
             zoom = node('button', 'insp-zoom');
           zoom.type = 'button';
-          zoom.setAttribute('aria-label', 'Forstørr bilde' + (p.description ? ': ' + p.description : ''));
+          zoom.setAttribute(
+            'aria-label',
+            (p.type === 'video' ? 'Spill av video' : 'Forstørr bilde') + (p.description ? ': ' + p.description : ''),
+          );
           zoom.onclick = () => {
             show(idx);
             if (!lb.open) lb.showModal();
           };
           zoom.append(img);
+          if (p.type === 'video') {
+            zoom.append(node('span', 'insp-play', '▶'));
+            hoverPlay(zoom, p);
+          }
           fig.append(zoom);
           const cap = node('figcaption');
           if (p.description) cap.append(node('div', '', p.description));
@@ -832,6 +954,28 @@
         widgetId = window.turnstile.render('#insp-turnstile', { sitekey: siteKey });
       };
       document.head.append(script);
+    }
+    async function sendImage(f) {
+      const r = await fetch(`${api}/api/submit`, { method: 'POST', body: f });
+      return { ok: r.ok, data: await r.json() };
+    }
+    function sendVideo(f, onPct) {
+      return new Promise((resolve, reject) => {
+        const x = new XMLHttpRequest();
+        x.open('POST', `${api}/api/submit-video`);
+        x.upload.onprogress = (e) => {
+          if (e.lengthComputable) onPct(Math.round((e.loaded / e.total) * 100));
+        };
+        x.onload = () => {
+          let d = {};
+          try {
+            d = JSON.parse(x.responseText);
+          } catch {}
+          resolve({ ok: x.status >= 200 && x.status < 300, data: d });
+        };
+        x.onerror = () => reject(Error('Kunne ikke nå serveren. Prøv igjen.'));
+        x.send(f);
+      });
     }
     function convert(file) {
       return new Promise((resolve, reject) => {
@@ -876,11 +1020,42 @@
         c.hidden = on;
       }
     };
+    const say = (msg, isError = false) => {
+      feedback.textContent = msg;
+      feedback.classList.toggle('insp-error', isError);
+      feedback.setAttribute('role', isError ? 'alert' : 'status');
+      if (isError) feedback.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    };
+    const fileInput = form.querySelector('input[type=file]');
+    const isVideoFile = (f) => f.type.startsWith('video/') || /\.(mp4|mov|webm)$/i.test(f.name);
+    const fileProblem = (msg) => Object.assign(Error(msg), { file: true });
+    const rejectFile = (msg) => {
+      fileInput.value = '';
+      say(msg + ' Velg en annen fil.', true);
+    };
+    fileInput.addEventListener('change', () => {
+      say('');
+      const f = fileInput.files[0];
+      if (!f) return;
+      const video = isVideoFile(f);
+      if (f.size > (video ? 150 : 15) * 1024 * 1024)
+        return rejectFile(video ? 'Videoen er for stor (maks 150 MB).' : 'Bildet er for stort (maks 15 MB).');
+      if (!video) return;
+      const url = URL.createObjectURL(f),
+        probe = document.createElement('video');
+      probe.preload = 'metadata';
+      probe.onloadedmetadata = () => {
+        URL.revokeObjectURL(url);
+        if (fileInput.files[0] === f && probe.duration > 15.5) rejectFile('Videoen er for lang (maks 15 sekunder).');
+      };
+      probe.onerror = () => URL.revokeObjectURL(url);
+      probe.src = url;
+    });
     document.getElementById('insp-open').onclick = async () => {
       if (form.dataset.done) {
         form.reset();
         showReceipt(false);
-        feedback.textContent = '';
+        say('');
         delete form.dataset.done;
         window.turnstile?.reset(widgetId);
       }
@@ -890,7 +1065,7 @@
           await config();
           turnstile();
         } catch (e) {
-          feedback.textContent = e.message;
+          say(e.message, true);
         }
       }
     };
@@ -900,31 +1075,46 @@
       e.preventDefault();
       const button = document.getElementById('insp-submit');
       button.disabled = true;
-      feedback.textContent = 'Laster opp …';
+      say('Laster opp …');
       try {
         const f = new FormData(form),
-          file = f.get('image');
-        if (!file || file.size > 15 * 1024 * 1024) throw Error('Velg et bilde under 15 MB');
-        const blob = await convert(file);
-        if (blob.size > 8 * 1024 * 1024) throw Error('Bildet er for stort');
-        f.set('image', blob, 'photo.webp');
+          file = f.get('image'),
+          isVideo = !!file && isVideoFile(file);
+        if (!file || file.size > (isVideo ? 150 : 15) * 1024 * 1024)
+          throw fileProblem(isVideo ? 'Videoen er for stor (maks 150 MB).' : 'Bildet er for stort (maks 15 MB).');
+        if (isVideo) {
+          f.delete('image');
+          f.set('video', file);
+        } else {
+          const blob = await convert(file).catch((e) => {
+            throw fileProblem(e.message);
+          });
+          if (blob.size > 8 * 1024 * 1024) throw fileProblem('Bildet er for stort.');
+          f.set('image', blob, 'photo.webp');
+        }
         f.set('galleryConsent', String(f.get('galleryConsent') === 'on'));
         f.set('marketingConsent', String(f.get('marketingConsent') === 'on'));
         f.set('turnstileToken', window.turnstile?.getResponse(widgetId) || '');
         f.set('consentVersion', consentVersion);
-        const r = await fetch(`${api}/api/submit`, { method: 'POST', body: f });
-        const data = await r.json();
-        if (!r.ok) throw Error(data.error || 'Opplasting feilet');
+        const { ok, data } = isVideo
+          ? await sendVideo(f, (pct) => {
+              say(pct < 100 ? `Laster opp … ${pct} %` : 'Sjekker videoen …');
+            })
+          : await sendImage(f);
+        if (!ok) throw data.field === 'file' ? fileProblem(data.error) : Error(data.error || 'Opplasting feilet');
         const link = `${api}/remove.html?id=${encodeURIComponent(data.id)}&token=${encodeURIComponent(data.removalToken)}`;
         feedback.replaceChildren(
-          node('strong', '', 'Takk! Bildet er sendt til godkjenning.'),
+          node('strong', '', isVideo ? 'Takk! Videoen er sendt til godkjenning.' : 'Takk! Bildet er sendt til godkjenning.'),
           node(
             'p',
             '',
-            'Ta vare på denne slettelenken. Det er den eneste måten å fjerne bildet på, og vi kan ikke sende den på nytt.',
+            (isVideo ? 'Videoen komprimeres først, så det kan ta litt tid før den kan godkjennes. ' : '') +
+              'Ta vare på denne slettelenken. Det er den eneste måten å fjerne ' +
+              (isVideo ? 'videoen' : 'bildet') +
+              ' på, og vi kan ikke sende den på nytt.',
           ),
         );
-        const a = node('a', '', 'Administrer eller slett bildet');
+        const a = node('a', '', 'Administrer eller slett');
         a.href = link;
         a.target = '_blank';
         a.rel = 'noopener';
@@ -949,7 +1139,8 @@
         showReceipt(true);
         form.dataset.done = '1';
       } catch (err) {
-        feedback.textContent = err.message;
+        if (err.file) fileInput.value = '';
+        say(err.message + (err.file ? ' Velg en annen fil.' : ''), true);
       } finally {
         button.disabled = false;
         window.turnstile?.reset(widgetId);

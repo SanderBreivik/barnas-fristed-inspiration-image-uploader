@@ -9,6 +9,7 @@ import { dataDir, env, num } from "./config.js";
 import { db } from "./db.js";
 import { storage } from "./storage.js";
 import { log, errFields } from "./log.js";
+import { extractPoster, videoFile, removeVideoFiles } from "./video.js";
 
 export const THUMB_WIDTH = num(env.THUMB_WIDTH, 720);
 const dir = path.join(dataDir, "thumbs");
@@ -40,18 +41,24 @@ const limited = (fn) =>
 const inFlight = new Map(); // id -> Promise<Buffer>, so duplicate requests share one job
 
 async function generate(row) {
-  const full = await storage.get(row.object_key);
-  const meta = await sharp(full).metadata();
-  const buf = await sharp(full)
-    .resize({ width: THUMB_WIDTH, withoutEnlargement: true })
-    .webp({ quality: 78 })
-    .toBuffer();
-  if (meta.width && meta.height)
-    db.prepare("UPDATE photos SET width=?,height=? WHERE id=? AND (width IS NULL OR height IS NULL)").run(
-      meta.width,
-      meta.height,
-      row.id,
-    );
+  let buf;
+  if (row.media_type === "video") {
+    const frame = await extractPoster(await videoFile(row));
+    buf = await sharp(frame).resize({ width: THUMB_WIDTH, withoutEnlargement: true }).webp({ quality: 78 }).toBuffer();
+  } else {
+    const full = await storage.get(row.object_key);
+    const meta = await sharp(full).metadata();
+    buf = await sharp(full)
+      .resize({ width: THUMB_WIDTH, withoutEnlargement: true })
+      .webp({ quality: 78 })
+      .toBuffer();
+    if (meta.width && meta.height)
+      db.prepare("UPDATE photos SET width=?,height=? WHERE id=? AND (width IS NULL OR height IS NULL)").run(
+        meta.width,
+        meta.height,
+        row.id,
+      );
+  }
   try {
     const tmp = `${file(row.id)}.tmp`;
     writeFileSync(tmp, buf);
@@ -62,7 +69,7 @@ async function generate(row) {
   return buf;
 }
 
-// row: { id, object_key }
+// row: { id, object_key, media_type }
 export async function getThumb(row) {
   try {
     return readFileSync(file(row.id));
@@ -78,6 +85,12 @@ export async function getThumb(row) {
 
 export function removeThumb(id) {
   rmSync(file(id), { force: true });
+}
+
+// Cached files of a photo that is no longer public (thumbnail and video copy).
+export function removeMedia(id) {
+  removeThumb(id);
+  removeVideoFiles(id);
 }
 
 // Deletes cached thumbnails whose photo is not (or no longer) approved.

@@ -197,6 +197,21 @@
       height: 100%;
       object-fit: contain;
     }
+    .thumb video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+    }
+    .thumb .note {
+      padding: 16px;
+      color: #777;
+      text-align: center;
+    }
+    .actions button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
     .body {
       padding: 14px 16px;
       display: flex;
@@ -353,12 +368,35 @@
     function cardFor(p, st) {
       const card = el("div", "card"),
         thumb = el("div", "thumb"),
-        img = document.createElement("img");
-      img.alt = p.description || "Innsendt bilde";
-      api("/api/admin/preview/" + p.id).then(async (r) => {
-        if (r.ok) img.src = URL.createObjectURL(await r.blob());
-      });
-      thumb.append(img);
+        isVideo = p.media_type === "video";
+      if (isVideo && p.media_status !== "ready") {
+        thumb.append(
+          el(
+            "div",
+            "note",
+            p.media_status === "failed"
+              ? "Behandlingen av videoen feilet. Avvis eller slett den."
+              : "Videoen behandles … trykk Oppdater om litt.",
+          ),
+        );
+      } else if (isVideo) {
+        const vid = document.createElement("video");
+        vid.controls = true;
+        vid.playsInline = true;
+        vid.preload = "metadata";
+        vid.src = "/api/admin/video/" + p.id;
+        api("/api/admin/preview/" + p.id).then(async (r) => {
+          if (r.ok) vid.poster = URL.createObjectURL(await r.blob());
+        });
+        thumb.append(vid);
+      } else {
+        const img = document.createElement("img");
+        img.alt = p.description || "Innsendt bilde";
+        api("/api/admin/preview/" + p.id).then(async (r) => {
+          if (r.ok) img.src = URL.createObjectURL(await r.blob());
+        });
+        thumb.append(img);
+      }
       card.append(thumb);
       const body = el("div", "body");
       body.append(el("div", "name", p.display_name || "Anonym"));
@@ -377,6 +415,15 @@
         ),
       );
       body.append(meta);
+      if (isVideo)
+        meta.prepend(
+          el(
+            "span",
+            "chip",
+            "Video" +
+              (p.duration_ms ? " · " + Math.round(p.duration_ms / 1000) + " s" : ""),
+          ),
+        );
       if (p.submitted_at)
         body.append(
           el(
@@ -395,8 +442,12 @@
           { approve: "ok", reject: "no-btn", delete: "del" }[action],
           { approve: "Godkjenn", reject: "Avvis", delete: "Slett" }[action],
         );
+        if (action === "approve" && isVideo && p.media_status !== "ready") {
+          b.disabled = true;
+          b.title = "Videoen er ikke ferdig behandlet";
+        }
         b.onclick = async () => {
-          if (action === "delete" && !confirm("Slett bildet permanent?"))
+          if (action === "delete" && !confirm("Slett permanent?"))
             return;
           const r = await api("/api/admin/photos/" + p.id + "/" + action, {
             method: "POST",
@@ -409,7 +460,30 @@
       card.append(acts);
       return card;
     }
+    let pollTimer = 0;
+    // While videos are being compressed, check quietly and reload once one is done.
+    function watchProcessing(pending) {
+      clearTimeout(pollTimer);
+      const waiting = new Set(
+        pending.filter((p) => p.media_status === "processing").map((p) => p.id),
+      );
+      if (!waiting.size) return;
+      pollTimer = setTimeout(async function poll() {
+        try {
+          const r = await api("/api/admin/photos?status=pending");
+          if (r.ok) {
+            const now = (await r.json()).photos;
+            const stillWaiting = now.some(
+              (p) => waiting.has(p.id) && p.media_status === "processing",
+            );
+            if (now.length !== pending.length || !stillWaiting) return load();
+          }
+        } catch {}
+        pollTimer = setTimeout(poll, 8000);
+      }, 8000);
+    }
     async function load() {
+      clearTimeout(pollTimer);
       box.replaceChildren();
       const results = await Promise.all(
         SECTIONS.map(([s]) => api("/api/admin/photos?status=" + s)),
@@ -427,6 +501,7 @@
       for (let i = 0; i < SECTIONS.length; i++) {
         const [st, label] = SECTIONS[i],
           photos = (await results[i].json()).photos;
+        if (st === "pending") watchProcessing(photos);
         const sec = el("details", "sec"),
           sum = el("summary");
         sec.open = openState[st];

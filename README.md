@@ -30,7 +30,7 @@ Tilpasset `barnas-fristed.myshopify.com` og `https://barnasfristed.no`. Kodegrun
 
 ## Samtykke og oppbevaring (UTKAST – krever eiers og juridisk vurdering)
 
-Samtykketekstene ligger i `server/consent.js` (`CONSENT_TEXT`, `MARKETING_TEXT`) og hentes av skjemaet via `GET /api/consent`, slik at skjema og logg alltid er identiske. Samtykkene er uavhengige: markedsføring er valgfritt og aldri en forutsetning for publisering. Ved hver innsending lagres nøyaktig tekst og versjon som ble vist. Endrer du teksten, **øk `CONSENT_VERSION`** (standard `2026-10-v2`; fjern en eventuell gammel `CONSENT_VERSION`-secret). Skjema med utdatert versjon avvises med 409.
+Samtykketekstene ligger i `server/consent.js` (`CONSENT_TEXT`, `MARKETING_TEXT`) og hentes av skjemaet via `GET /api/consent`, slik at skjema og logg alltid er identiske. Samtykkene er uavhengige: markedsføring er valgfritt og aldri en forutsetning for publisering. Ved hver innsending lagres nøyaktig tekst og versjon som ble vist. Endrer du teksten, **øk `CONSENT_VERSION`** (standard `2026-10-v3`; fjern en eventuell gammel `CONSENT_VERSION`-secret). Skjema med utdatert versjon avvises med 409.
 
 Foreslått oppbevaring (må godkjennes). Automatisk håndhevelse er implementert, men **av som standard** (se «Automatisk opprydding» under):
 
@@ -117,6 +117,18 @@ Automatiske tester (`npm test`) tar en backup, verifiserer den med integritetssj
 - Svarene har `ETag` og `Cache-Control: public, max-age=60`; nettleseren får `304` uten at Tigris kontaktes. Cachetiden er bevisst kort: et slettet bilde forsvinner fra nettleserbufferen på ca. ett minutt.
 - Miniatyrer av bilder som ikke lenger er godkjent slettes ved avvisning/sletting og ryddes hvert time.
 
+## Video
+
+Kunder kan laste opp video (MP4, MOV/iPhone eller WebM) i samme skjema som bilder. Maks 15 sekunder; opplastingen kan være opptil 150 MB.
+
+- Serveren sjekker filen (filtype fra de første bytene, `ffprobe` for lengde og oppløsning) og svarer med en gang. Deretter komprimeres den i bakgrunnen til MP4 (H.264/AAC, maks 1280 px på lengste side, metadata fjernes). Er resultatet over målstørrelsen (8 MB), prøves gradvis sterkere komprimering (lavere kvalitet, så lavere oppløsning). Resultater opp til 2× målet godtas; er det fortsatt for stort, får videoen status «feilet».
+- Videoer behandles én om gangen. Mens en video behandles vises den i `/admin` som «behandles» og kan ikke godkjennes. Avbrutt behandling (omstart) gjenopptas automatisk.
+- Lagring: `photos/<id>.mp4` i Tigris. Kopi for avspilling ligger i `/data/videos` (kan gjenskapes) og opprettholder Range-forespørsler (kreves av Safari/iOS). Plakatbildet i galleriet lages av `ffmpeg` fra videoen og lagres som miniatyr.
+- `ffmpeg` installeres i `Dockerfile`. Lokalt trengs det bare for å kjøre videoopplasting manuelt; testene bruker en mock.
+- Innstillinger (valgfrie): `VIDEO_MAX_SECONDS` (15), `VIDEO_MAX_UPLOAD_MB` (150), `VIDEO_TARGET_MB` (8), `VIDEO_QUEUE_MAX` (4 ventende), `VIDEO_JOB_TIMEOUT_S` (240).
+- Sikkerhet: `ffmpeg` får bare lese lokale filer og bare med MP4/MOV- eller Matroska/WebM-leser, så avspillingslister (`.m3u8`) og lignende avvises.
+- Samtykketeksten dekker nå «bildet eller videoen» (versjon `2026-10-v3`). Personvernerklæringen må nevne video og at stemmer kan høres.
+
 ## Kodestruktur (`server/`)
 
 | Fil | Ansvar |
@@ -132,7 +144,8 @@ Automatiske tester (`npm test`) tar en backup, verifiserer den med integritetssj
 | `maintenance.js`, `jobs.js`, `restore-check.js` | Backup, gjenoppretting, opprydding, bakgrunnsjobber |
 | `log.js` | JSON-logging uten hemmeligheter |
 | `routes/public.js` | Health, config, samtykke, galleri, bilder |
-| `routes/submit.js` | Opplasting |
+| `routes/submit.js` | Opplasting av bilder (og felles kontroller) |
+| `routes/submit-video.js`, `video.js` | Videoopplasting, komprimering i bakgrunnen, avspillingskopi |
 | `routes/removal.js` | Kundens slettelenke |
 | `routes/admin.js` | Moderering og vedlikehold |
 
@@ -145,7 +158,7 @@ Tillatt er `barnasfristed.no`, `www.barnasfristed.no`, `barnas-fristed.myshopify
 
 ## API
 
-`GET /api/config`, `GET /api/gallery?page=0`, `GET /images/:id`, `POST /api/submit`, `POST /api/remove`, `GET /admin`, `GET /api/admin/photos`, `GET /api/admin/preview/:id`, `POST /api/admin/photos/:id/:action`.
+`GET /api/config`, `GET /api/gallery?page=0`, `GET /images/:id`, `GET /images/:id/thumb`, `GET /videos/:id`, `POST /api/submit`, `POST /api/submit-video`, `POST /api/remove`, `GET /admin`, `GET /api/admin/photos`, `GET /api/admin/preview/:id`, `GET /api/admin/video/:id`, `POST /api/admin/photos/:id/:action`.
 
 ## Overvåking og logging
 
