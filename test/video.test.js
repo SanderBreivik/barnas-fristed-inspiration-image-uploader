@@ -36,6 +36,7 @@ globalThis.fetch = (url, opts) =>
 // ffprobe/ffmpeg are replaced so the tests do not need them installed.
 let inputProbe, sizeForCrf, gate;
 const ffmpegCrfs = [];
+const encodeCalls = [];
 let poster;
 tools.run = async (cmd, args) => {
   const last = args.at(-1);
@@ -51,6 +52,7 @@ tools.run = async (cmd, args) => {
   }
   const crf = Number(args[args.indexOf("-crf") + 1]);
   ffmpegCrfs.push(crf);
+  encodeCalls.push(args);
   if (gate) await gate;
   writeFileSync(last, Buffer.alloc(sizeForCrf(crf), 1));
   return "";
@@ -84,11 +86,13 @@ const reset = () => {
   sizeForCrf = () => 5000;
   gate = null;
   ffmpegCrfs.length = 0;
+  encodeCalls.length = 0;
 };
 
-function submit(file = mp4) {
+function submit(file = mp4, audio) {
   const f = new FormData();
   f.set("video", new Blob([file]), "clip.mp4");
+  if (audio !== undefined) f.set("includeAudio", String(audio));
   f.set("galleryConsent", "true");
   f.set("marketingConsent", "false");
   f.set("consentVersion", version);
@@ -151,6 +155,22 @@ test("too large output is compressed again with stronger settings until it fits"
   assert.deepEqual(ffmpegCrfs, crfs.slice(0, 3));
   assert.equal(row(id).media_status, "ready");
   assert.equal(puts.get(`photos/${id}.mp4`).length, 9000);
+});
+
+test("sound is removed unless the customer chose to keep it", async () => {
+  reset();
+  const silent = await (await submit()).json();
+  await idle();
+  assert.ok(encodeCalls.at(-1).includes("-an"));
+  assert.ok(!encodeCalls.at(-1).includes("-c:a"));
+  assert.equal(row(silent.id).keep_audio, 0);
+
+  reset();
+  const loud = await (await submit(mp4, true)).json();
+  await idle();
+  assert.ok(!encodeCalls.at(-1).includes("-an"));
+  assert.ok(encodeCalls.at(-1).includes("-c:a"));
+  assert.equal(row(loud.id).keep_audio, 1);
 });
 
 test("a result between one and two times the target is accepted", async () => {

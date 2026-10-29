@@ -125,6 +125,7 @@ Kunder kan laste opp video (MP4, MOV/iPhone eller WebM) i samme skjema som bilde
 - Videoer behandles én om gangen. Mens en video behandles vises den i `/admin` som «behandles» og kan ikke godkjennes. Avbrutt behandling (omstart) gjenopptas automatisk.
 - Lagring: `photos/<id>.mp4` i Tigris. Kopi for avspilling ligger i `/data/videos` (kan gjenskapes) og opprettholder Range-forespørsler (kreves av Safari/iOS). Plakatbildet i galleriet lages av `ffmpeg` fra videoen og lagres som miniatyr.
 - `ffmpeg` installeres i `Dockerfile`. Lokalt trengs det bare for å kjøre videoopplasting manuelt; testene bruker en mock.
+- Lyd: skjemaet har en avkrysning «Ta med lyd i videoen» som er av som standard. Uten hake fjernes lydsporet helt av `ffmpeg` (`-an`), så lyden finnes ikke i den lagrede eller publiserte videoen. Valget lagres i `keep_audio` og vises i `/admin`.
 - Innstillinger (valgfrie): `VIDEO_MAX_SECONDS` (15), `VIDEO_MAX_UPLOAD_MB` (150), `VIDEO_TARGET_MB` (8), `VIDEO_QUEUE_MAX` (4 ventende), `VIDEO_JOB_TIMEOUT_S` (240).
 - Sikkerhet: `ffmpeg` får bare lese lokale filer og bare med MP4/MOV- eller Matroska/WebM-leser, så avspillingslister (`.m3u8`) og lignende avvises.
 - Samtykketeksten dekker nå «bildet eller videoen» (versjon `2026-10-v3`). Personvernerklæringen må nevne video og at stemmer kan høres.

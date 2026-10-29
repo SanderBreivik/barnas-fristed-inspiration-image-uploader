@@ -20,8 +20,16 @@
           type="file"
           name="image"
           accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm"
-          required></label>
+          required
+      ></label>
       <p id="insp-feedback" role="status"></p>
+      <label class="insp-check insp-off" id="insp-audio-row"
+        ><input type="checkbox" name="includeAudio">
+        <span
+          >Ta med lyd i videoen. Stemmer og annen lyd kan da høres av alle som ser den. Uten hake publiseres videoen
+          uten lyd.</span
+        ></label
+      >
       <label>Navn (valgfritt)<input name="displayName" maxlength="80"></label
       ><label>Beskrivelse (valgfritt)<textarea name="description" maxlength="500"></textarea></label
       ><label
@@ -40,13 +48,16 @@
       </p>
       <div id="insp-turnstile"></div>
       <button type="submit" id="insp-submit">Send til godkjenning</button>
+      <p id="insp-status" role="status"></p>
     </form>
   </dialog>
   <dialog id="insp-lightbox" aria-label="Forstørret bilde">
-    <button type="button" class="insp-lb-close" id="insp-lb-close" aria-label="Lukk">×</button
-    ><button type="button" class="insp-lb-nav insp-lb-prev" id="insp-lb-prev" aria-label="Forrige bilde">‹</button
-    ><button type="button" class="insp-lb-nav insp-lb-next" id="insp-lb-next" aria-label="Neste bilde">›</button>
-    <div class="insp-lb-stage"><img id="insp-lb-img" alt=""><video id="insp-lb-video" controls playsinline preload="metadata" hidden></video></div>
+    <button type="button" class="insp-lb-close" id="insp-lb-close" aria-label="Lukk">×</button>
+    <div class="insp-lb-stage">
+      <button type="button" class="insp-lb-nav insp-lb-prev" id="insp-lb-prev" aria-label="Forrige bilde">‹</button>
+      <img id="insp-lb-img" alt=""><video id="insp-lb-video" controls playsinline preload="metadata" hidden></video>
+      <button type="button" class="insp-lb-nav insp-lb-next" id="insp-lb-next" aria-label="Neste bilde">›</button>
+    </div>
     <div class="insp-lb-cap" id="insp-lb-cap" aria-live="polite"></div>
   </dialog>
 </section>
@@ -59,6 +70,7 @@
   }
   .insp-header {
     display: flex;
+    flex-direction: column;
     justify-content: space-between;
     align-items: center;
     gap: 16px;
@@ -246,7 +258,8 @@
   #insp-form [hidden] {
     display: none !important;
   }
-  #insp-feedback input {
+  #insp-feedback input,
+  #insp-status input {
     width: 100%;
     padding: 10px;
     border: 1px solid #aaa;
@@ -254,7 +267,8 @@
     margin: 10px 0;
     font-size: 13px;
   }
-  #insp-feedback button {
+  #insp-feedback button,
+  #insp-status button {
     padding: 8px 16px;
     border: 0;
     border-radius: 5px;
@@ -262,17 +276,24 @@
     color: #fff;
     cursor: pointer;
   }
-  #insp-feedback a {
+  #insp-feedback a,
+  #insp-status a {
     display: inline-block;
     margin-top: 6px;
   }
-  #insp-feedback {
+  #insp-feedback,
+  #insp-status {
     margin: 0;
   }
-  #insp-feedback:empty {
+  #insp-feedback:empty,
+  #insp-status:empty {
     display: none;
   }
-  #insp-feedback.insp-error {
+  .insp-off {
+    display: none !important;
+  }
+  #insp-feedback.insp-error,
+  #insp-status.insp-error {
     padding: 12px 14px;
     border: 1px solid #f1b5ae;
     border-radius: 10px;
@@ -282,7 +303,8 @@
     font-weight: 600;
     line-height: 1.4;
   }
-  #insp-feedback.insp-error::before {
+  #insp-feedback.insp-error::before,
+  #insp-status.insp-error::before {
     content: '⚠\00a0';
   }
   .insp-zoom {
@@ -349,6 +371,7 @@
     flex-direction: column;
   }
   .insp-lb-stage {
+    position: relative;
     background: #111;
     display: flex;
     align-items: center;
@@ -407,7 +430,11 @@
     right: 10px;
   }
   .insp-lb-nav {
-    top: calc(35vh - 22px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(255, 255, 255, 0.92);
+    color: #111;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
   }
   .insp-lb-prev {
     left: 10px;
@@ -415,13 +442,18 @@
   .insp-lb-next {
     right: 10px;
   }
-  .insp-lb-close:hover,
-  .insp-lb-nav:hover {
+  .insp-lb-close:hover {
     background: #000;
   }
-  .insp-lb-close:focus-visible,
-  .insp-lb-nav:focus-visible {
+  .insp-lb-nav:hover {
+    background: #fff;
+  }
+  .insp-lb-close:focus-visible {
     outline: 3px solid #fff;
+    outline-offset: 2px;
+  }
+  .insp-lb-nav:focus-visible {
+    outline: 3px solid #ffd54a;
     outline-offset: 2px;
   }
   .insp-lb-nav[hidden] {
@@ -1039,25 +1071,38 @@
     }
     const showReceipt = (on) => {
       for (const c of form.children) {
-        if (c.id === 'insp-feedback' || c.id === 'insp-close' || c.tagName === 'H2') continue;
+        if (c.id === 'insp-feedback' || c.id === 'insp-status' || c.id === 'insp-close' || c.tagName === 'H2') continue;
         c.hidden = on;
       }
     };
-    const say = (msg, isError = false) => {
-      feedback.textContent = msg;
-      feedback.classList.toggle('insp-error', isError);
-      feedback.setAttribute('role', isError ? 'alert' : 'status');
-      if (isError) feedback.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    const statusEl = document.getElementById('insp-status');
+    const put = (el, msg, isError) => {
+      el.textContent = msg;
+      el.classList.toggle('insp-error', isError);
+      el.setAttribute('role', isError ? 'alert' : 'status');
+      if (isError) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     };
+    // Under the file field: problems with the chosen file.
+    const say = (msg, isError = false) => put(feedback, msg, isError);
+    // Under the send button: progress, errors from sending and the receipt.
+    const setStatus = (msg, isError = false) => put(statusEl, msg, isError);
     const fileInput = form.querySelector('input[type=file]');
     const isVideoFile = (f) => f.type.startsWith('video/') || /\.(mp4|mov|webm)$/i.test(f.name);
+    const audioRow = document.getElementById('insp-audio-row');
+    const syncAudio = () => {
+      const f = fileInput.files[0];
+      audioRow.classList.toggle('insp-off', !(f && isVideoFile(f)));
+    };
     const fileProblem = (msg) => Object.assign(Error(msg), { file: true });
     const rejectFile = (msg) => {
       fileInput.value = '';
+      syncAudio();
       say(msg + ' Velg en annen fil.', true);
     };
     fileInput.addEventListener('change', () => {
       say('');
+      setStatus('');
+      syncAudio();
       const f = fileInput.files[0];
       if (!f) return;
       const video = isVideoFile(f);
@@ -1078,7 +1123,9 @@
       if (form.dataset.done) {
         form.reset();
         showReceipt(false);
+        syncAudio();
         say('');
+        setStatus('');
         delete form.dataset.done;
         window.turnstile?.reset(widgetId);
       }
@@ -1088,7 +1135,7 @@
           await config();
           turnstile();
         } catch (e) {
-          say(e.message, true);
+          setStatus(e.message, true);
         }
       }
     };
@@ -1098,7 +1145,8 @@
       e.preventDefault();
       const button = document.getElementById('insp-submit');
       button.disabled = true;
-      say('Laster opp …');
+      say('');
+      setStatus('Laster opp …');
       try {
         const f = new FormData(form),
           file = f.get('image'),
@@ -1108,6 +1156,7 @@
         if (isVideo) {
           f.delete('image');
           f.set('video', file);
+          f.set('includeAudio', String(f.get('includeAudio') === 'on'));
         } else {
           const blob = await convert(file).catch((e) => {
             throw fileProblem(e.message);
@@ -1121,13 +1170,17 @@
         f.set('consentVersion', consentVersion);
         const { ok, data } = isVideo
           ? await sendVideo(f, (pct) => {
-              say(pct < 100 ? `Laster opp … ${pct} %` : 'Sjekker videoen …');
+              setStatus(pct < 100 ? `Laster opp … ${pct} %` : 'Sjekker videoen …');
             })
           : await sendImage(f);
         if (!ok) throw data.field === 'file' ? fileProblem(data.error) : Error(data.error || 'Opplasting feilet');
         const link = `${api}/remove.html?id=${encodeURIComponent(data.id)}&token=${encodeURIComponent(data.removalToken)}`;
-        feedback.replaceChildren(
-          node('strong', '', isVideo ? 'Takk! Videoen er sendt til godkjenning.' : 'Takk! Bildet er sendt til godkjenning.'),
+        statusEl.replaceChildren(
+          node(
+            'strong',
+            '',
+            isVideo ? 'Takk! Videoen er sendt til godkjenning.' : 'Takk! Bildet er sendt til godkjenning.',
+          ),
           node(
             'p',
             '',
@@ -1157,13 +1210,17 @@
             copy.textContent = 'Marker og kopier manuelt';
           }
         };
-        feedback.append(a, inp, copy);
+        statusEl.append(a, inp, copy);
         form.reset();
         showReceipt(true);
         form.dataset.done = '1';
       } catch (err) {
-        if (err.file) fileInput.value = '';
-        say(err.message + (err.file ? ' Velg en annen fil.' : ''), true);
+        if (err.file) {
+          fileInput.value = '';
+          syncAudio();
+          setStatus('');
+          say(err.message + ' Velg en annen fil.', true);
+        } else setStatus(err.message, true);
       } finally {
         button.disabled = false;
         window.turnstile?.reset(widgetId);

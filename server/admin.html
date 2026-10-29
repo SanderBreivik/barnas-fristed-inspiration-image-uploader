@@ -421,7 +421,8 @@
             "span",
             "chip",
             "Video" +
-              (p.duration_ms ? " · " + Math.round(p.duration_ms / 1000) + " s" : ""),
+              (p.duration_ms ? " · " + Math.round(p.duration_ms / 1000) + " s" : "") +
+              (p.keep_audio ? " · med lyd" : " · uten lyd"),
           ),
         );
       if (p.submitted_at)

@@ -84,6 +84,7 @@ submitVideoRouter.post(
         product: ctx.product,
         media: "video",
         durationMs: Math.round(info.duration * 1000),
+        keepAudio: req.body.includeAudio === "true",
       });
       accepted = true;
       hit(ctx.quotaKey, LIMITS.quotaWindow);

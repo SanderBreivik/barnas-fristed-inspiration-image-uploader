@@ -25,3 +25,6 @@ if (!columns.includes("media_type"))
 if (!columns.includes("media_status"))
   db.exec("ALTER TABLE photos ADD COLUMN media_status TEXT NOT NULL DEFAULT 'ready'");
 if (!columns.includes("duration_ms")) db.exec("ALTER TABLE photos ADD COLUMN duration_ms INTEGER");
+// 1 when the customer chose to keep the sound of a video; otherwise it is removed.
+if (!columns.includes("keep_audio"))
+  db.exec("ALTER TABLE photos ADD COLUMN keep_audio INTEGER NOT NULL DEFAULT 0");

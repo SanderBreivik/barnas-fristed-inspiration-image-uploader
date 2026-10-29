@@ -72,14 +72,17 @@ export async function admit(req, res, fileMessage) {
 }
 
 // Inserts the photo row and its "submitted" consent event in one transaction.
-export function record(req, { id, token, key, product, width, height, media = "image", durationMs = null }) {
+export function record(
+  req,
+  { id, token, key, product, width, height, media = "image", durationMs = null, keepAudio = false },
+) {
   const marketing = req.body.marketingConsent === "true" ? 1 : 0,
     // Record exactly the text(s) the customer saw and agreed to.
     consentRecord = marketing ? `${CONSENT_TEXT}\n---\n${MARKETING_TEXT}` : CONSENT_TEXT,
     timestamp = now();
   db.transaction(() => {
     db.prepare(
-      "INSERT INTO photos(id,object_key,display_name,description,product_handle,status,gallery_consent,marketing_consent,consent_version,consent_text,submitted_at,removal_token_hash,width,height,media_type,media_status,duration_ms) VALUES(?,?,?,?,?,'pending',1,?,?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO photos(id,object_key,display_name,description,product_handle,status,gallery_consent,marketing_consent,consent_version,consent_text,submitted_at,removal_token_hash,width,height,media_type,media_status,duration_ms,keep_audio) VALUES(?,?,?,?,?,'pending',1,?,?,?,?,?,?,?,?,?,?,?)",
     ).run(
       id,
       key,
@@ -96,6 +99,7 @@ export function record(req, { id, token, key, product, width, height, media = "i
       media,
       media === "video" ? "processing" : "ready",
       durationMs,
+      keepAudio ? 1 : 0,
     );
     db.prepare(
       "INSERT INTO consent_events(id,photo_id,action,version,consent_text,marketing_consent,created_at) VALUES(?,?,?,?,?,?,?)",

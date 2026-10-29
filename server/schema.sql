@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS photos (
  gallery_consent INTEGER NOT NULL CHECK(gallery_consent=1), marketing_consent INTEGER NOT NULL DEFAULT 0,
  consent_version TEXT NOT NULL, consent_text TEXT NOT NULL, submitted_at TEXT NOT NULL,
  approved_at TEXT, deleted_at TEXT, removal_token_hash TEXT NOT NULL,
- media_type TEXT NOT NULL DEFAULT 'image', media_status TEXT NOT NULL DEFAULT 'ready', duration_ms INTEGER
+ media_type TEXT NOT NULL DEFAULT 'image', media_status TEXT NOT NULL DEFAULT 'ready', duration_ms INTEGER, keep_audio INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_photos_public ON photos(status,approved_at);
 CREATE TABLE IF NOT EXISTS consent_events (

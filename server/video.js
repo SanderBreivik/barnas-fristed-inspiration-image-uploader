@@ -139,15 +139,15 @@ export const LADDER = [
   { long: 640, crf: 34, audio: 48 },
 ];
 
-function encodeArgs(input, output, fmt, r) {
+function encodeArgs(input, output, fmt, r, keepAudio) {
   return [
     "-nostdin", "-y", "-v", "error",
     "-protocol_whitelist", "file", "-f", fmt, "-i", input,
     "-t", String(VIDEO.maxSeconds + 0.5),
-    "-map", "0:v:0", "-map", "0:a:0?",
+    "-map", "0:v:0", ...(keepAudio ? ["-map", "0:a:0?"] : ["-an"]),
     "-vf", `scale='min(${r.long},iw)':'min(${r.long},ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p`,
     "-c:v", "libx264", "-preset", "veryfast", "-crf", String(r.crf), "-profile:v", "high", "-threads", "2",
-    "-c:a", "aac", "-b:a", `${r.audio}k`, "-ac", "2",
+    ...(keepAudio ? ["-c:a", "aac", "-b:a", `${r.audio}k`, "-ac", "2"] : []),
     "-map_metadata", "-1", "-map_chapters", "-1", "-sn", "-dn",
     "-movflags", "+faststart", "-fs", String(VIDEO.targetBytes * 3),
     output,
@@ -156,11 +156,11 @@ function encodeArgs(input, output, fmt, r) {
 
 // Re-encodes to MP4 (H.264/AAC), stepping down quality and size until the file is
 // at most the target size. A result up to twice the target is still accepted.
-export async function compress(input, output, fmt) {
+export async function compress(input, output, fmt, keepAudio = false) {
   let size = Infinity;
   for (let i = 0; i < LADDER.length; i++) {
     rmSync(output, { force: true });
-    await tools.run("ffmpeg", encodeArgs(input, output, fmt, LADDER[i]), VIDEO.jobTimeoutMs);
+    await tools.run("ffmpeg", encodeArgs(input, output, fmt, LADDER[i], keepAudio), VIDEO.jobTimeoutMs);
     size = statSync(output).size;
     if (size <= VIDEO.targetBytes) return { attempts: i + 1, size };
   }
@@ -267,7 +267,7 @@ export async function processVideo(id) {
   const input = incomingPath(id);
   const output = `${input}.out.mp4`;
   const row = db
-    .prepare("SELECT id,object_key,status FROM photos WHERE id=? AND media_type='video' AND media_status='processing'")
+    .prepare("SELECT id,object_key,status,keep_audio FROM photos WHERE id=? AND media_type='video' AND media_status='processing'")
     .get(id);
   if (!row || row.status === "deleted") {
     removeVideoFiles(id);
@@ -278,7 +278,7 @@ export async function processVideo(id) {
   try {
     const fmt = sniff(head(input));
     if (!fmt) throw new VideoError("Ugyldig videoformat.");
-    result = await compress(input, output, fmt);
+    result = await compress(input, output, fmt, !!row.keep_audio);
     info = await probe(output, "mov");
   } catch (e) {
     fail(id, e);

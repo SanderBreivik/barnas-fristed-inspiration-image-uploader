@@ -27,7 +27,7 @@ adminRouter.get("/api/admin/photos", admin, (req, res) => {
   res.json({
     photos: db
       .prepare(
-        "SELECT id,display_name,description,product_handle,status,marketing_consent,submitted_at,media_type,media_status,duration_ms FROM photos WHERE status=? ORDER BY submitted_at DESC LIMIT 100",
+        "SELECT id,display_name,description,product_handle,status,marketing_consent,submitted_at,media_type,media_status,duration_ms,keep_audio FROM photos WHERE status=? ORDER BY submitted_at DESC LIMIT 100",
       )
       .all(status),
   });
