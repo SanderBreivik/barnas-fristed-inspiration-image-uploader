@@ -9,6 +9,7 @@ import { storage } from "../storage.js";
 import { sha, now, clean, error } from "../util.js";
 import { log, errFields } from "../log.js";
 import { CONSENT_TEXT, MARKETING_TEXT, CONSENT_VERSION } from "../consent.js";
+import { notifySubmission } from "../notify.js";
 import { allowOrigin } from "../origins.js";
 import { turnstile } from "../turnstile.js";
 import { LIMITS, limitRow, hit, retryAfter, submitAbuseLimit } from "../limits.js";
@@ -105,6 +106,7 @@ export function record(
       "INSERT INTO consent_events(id,photo_id,action,version,consent_text,marketing_consent,created_at) VALUES(?,?,?,?,?,?,?)",
     ).run(randomUUID(), id, "submitted", CONSENT_VERSION, consentRecord, marketing, timestamp);
   })();
+  notifySubmission({ id, media });
 }
 
 submitRouter.post("/api/submit", allowOrigin, submitAbuseLimit, uploadOne, async (req, res) => {
